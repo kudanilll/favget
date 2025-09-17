@@ -26,11 +26,11 @@ func publicID(domain, src string) string {
 }
 
 func (c *Cloud) UploadRemote(ctx context.Context, domain, srcURL string) (string, error) {
+	overwrite := true
 	resp, err := c.cld.Upload.Upload(ctx, srcURL, uploader.UploadParams{
 		PublicID: publicID(domain, srcURL),
-		Overwrite: true,
+		Overwrite: &overwrite,
 	})
 	if err != nil { return "", err }
-	// Aktifkan transformasi default di level delivery: f_auto,q_auto via URL param di client
 	return resp.SecureURL, nil
 }

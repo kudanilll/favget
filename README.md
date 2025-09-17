@@ -1,7 +1,5 @@
 # Favget
 
----
-
 Favget is a high-performance backend service for fetching and delivering favicons (and other website icons) with global caching and CDN support.
 It is designed to be **fast, reliable, and scalable** — ideal for projects that need to resolve, cache, and serve icons for multiple domains.
 
@@ -38,20 +36,6 @@ Client → Favget API
 - `GET /v1/icon?domain=example.com`
   → Redirects (302) to Cloudinary URL for <img> usage.
 
-- `GET /v1/icon?domain=example.com&format=json (optional)`
-  → Returns JSON metadata:
-
-```json
-{
-  "domain": "example.com",
-  "url": "https://res.cloudinary.com/.../favicon.png",
-  "width": 32,
-  "height": 32,
-  "contentType": "image/png",
-  "cached": true
-}
-```
-
 - `POST /v1/refresh (protected)`
   → Forces re-crawl and refresh of icon.
 
@@ -66,11 +50,28 @@ cd favget
 
 ### 2. Set environment variables
 
+1. Copy the sample and fill your credentials:
+
 ```bash
-export DATABASE_URL="postgres://..."
-export REDIS_URL="rediss://..."
-export CLOUDINARY_URL="cloudinary://API_KEY:API_SECRET@CLOUD_NAME"
-export PORT=8080
+cp .env.example .env
+```
+
+2. Edit `.env` with your credentials:
+
+```bash
+PORT=8080
+DATABASE_URL=postgres://user:pass@host:port/db?sslmode=require
+REDIS_URL=rediss://default:password@host:port
+CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME
+APP_ENV=dev
+CACHE_TTL_SECONDS=86400
+RATE_LIMIT_RPS=10
+```
+
+3. Make sure `.env` is ignored by git:
+
+```bash
+echo ".env" >> .gitignore
 ```
 
 ### 3. Run locally
@@ -149,7 +150,5 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
-
----
 
 Built with ❤️ using Go, Fly.io, Neon, Upstash, and Cloudinary.

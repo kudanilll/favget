@@ -2,7 +2,6 @@ package httpx
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -73,15 +72,6 @@ func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 	})
 	_ = s.Cache.Set(ctx, "icon:"+domain, cldURL)
 
-	// **Kamu bisa juga return JSON; di sini aku pilih redirect cepat untuk <img>**
 	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
 	http.Redirect(w, r, cldURL, http.StatusFound)
-}
-
-type JSON map[string]any
-
-func writeJSON(w http.ResponseWriter, code int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(payload)
 }

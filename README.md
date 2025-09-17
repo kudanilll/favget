@@ -50,13 +50,13 @@ cd favget
 
 ### 2. Set environment variables
 
-1. Copy the sample and fill your credentials:
+### 2.1 Copy the sample and fill your credentials:
 
 ```bash
 cp .env.example .env
 ```
 
-2. Edit `.env` with your credentials:
+### 2.2 Edit `.env` with your credentials:
 
 ```bash
 PORT=8080
@@ -68,7 +68,7 @@ CACHE_TTL_SECONDS=86400
 RATE_LIMIT_RPS=10
 ```
 
-3. Make sure `.env` is ignored by git:
+### 2.3 Make sure `.env` is ignored by git:
 
 ```bash
 echo ".env" >> .gitignore

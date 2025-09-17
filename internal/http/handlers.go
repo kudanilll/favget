@@ -8,10 +8,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/you/favget/internal/cache"
-	"github.com/you/favget/internal/cloud"
-	"github.com/you/favget/internal/resolver"
-	"github.com/you/favget/internal/store"
+	"github.com/kudanilll/favget/internal/cache"
+	"github.com/kudanilll/favget/internal/cloud"
+	"github.com/kudanilll/favget/internal/resolver"
+	"github.com/kudanilll/favget/internal/store"
 )
 
 type Server struct {

@@ -6,26 +6,27 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
 ## ✨ Features
 
 - 🔍 **Smart resolver** – Parses HTML `<link rel="icon">`, `apple-touch-icon`, `mask-icon`, and falls back to `/favicon.ico`.
-- 🚀 **Fast delivery** – Cached in Redis (Upstash) and served instantly on subsequent requests.
-- ☁️ **Cloud storage** – Icons are uploaded and optimized via Cloudinary (`f_auto`, `q_auto`).
-- 🗄️ **Persistent storage** – Metadata stored in Neon (Postgres) for consistency and revalidation.
-- 🌍 **Scalable hosting** – Deployable on Fly.io or Google Cloud Run with minimal setup.
-- 🔒 **Rate limiting** – Prevents abuse with per-IP and per-domain control (via Redis).
+- 🚀 **Fast delivery** – Optionally cache hot results in Redis (Upstash) for instant subsequent fetches.
+- ☁️ **Cloud delivery** – Icons are delivered & optimized via Cloudinary (`f_auto`, `q_auto`) using remote fetch.
+- 🗄️ **Persistent storage (optional)** – Store metadata in Neon (Postgres) for consistency and revalidation.
+- 🌍 **Simple hosting** – Deployable on **Vercel** using Go Serverless Functions.
+- 🔒 **Rate limiting (optional)** – Per-IP/per-domain control via Redis.
 - 📦 **API-first** – Simple endpoints for fetching icons or metadata.
 
 ## 🛠️ Tech Stack
 
 - **Language:** [Go](https://go.dev/)
+- **Runtime:** Vercel Go Serverless Functions
 - **Framework:** [chi](https://github.com/go-chi/chi) (lightweight HTTP router)
-- **Database:** [Neon Postgres](https://neon.tech/)
-- **Cache:** [Upstash Redis](https://upstash.com/)
+- **Database (optional):** [Neon Postgres](https://neon.tech/)
+- **Cache (optional):** [Upstash Redis](https://upstash.com/)
 - **Storage/CDN:** [Cloudinary](https://cloudinary.com/)
-- **Hosting:** [Fly.io](https://fly.io/) or [Cloud Run](https://cloud.google.com/run)
+- **Hosting:** [Vercel](https://vercel.com/)
 
 ## 📐 Architecture
 
 ```text
-Client → Favget API
+Client → Favget (Vercel Function)
   ↳ Redis (Upstash) – fast cache lookup
   ↳ Postgres (Neon) – metadata persistence
   ↳ Cloudinary – optimized icon storage & CDN delivery
@@ -38,6 +39,8 @@ Client → Favget API
 
 - `POST /v1/refresh (protected)`
   → Forces re-crawl and refresh of icon.
+
+> Default route on Vercel is /api/v1/icon. This repo uses vercel.json to rewrite /v1/icon → /api/v1/icon so your public URL stays clean.
 
 ## ⚡ Quickstart
 
@@ -76,32 +79,73 @@ echo ".env" >> .gitignore
 
 ### 3. Run locally
 
-```bash
-go run ./cmd/server
-```
-
-### 4. Test endpoint
+#### Using Vercel CLI (recommended):
 
 ```bash
-curl -i "http://localhost:8080/v1/icon?domain=github.com"
+npm i -g vercel
+vercel dev
+# opens http://localhost:3000
 ```
 
-### 5. Deploy
-
-- Fly.io
+#### Test:
 
 ```bash
-flyctl launch
-flyctl secrets set DATABASE_URL=... REDIS_URL=... CLOUDINARY_URL=...
-flyctl deploy
+curl -i "http://localhost:3000/v1/icon?domain=github.com"
 ```
 
-- Cloud Run
+> If you also keep a standalone Go server under cmd/server, you can still run:
+>
+> ```bash
+> go run ./cmd/server
+> ```
+>
+> but Vercel deploy uses the /api function version.
+
+### 4. Deploy to Vercel
+
+#### Option A — GitHub integration (recommended)
+
+1. Push this repo to GitHub.
+2. Import the repo in Vercel Dashboard.
+3. In Settings → Environment Variables, add:
+
+   - CLOUDINARY_CLOUD_NAME (required)
+   - DATABASE_URL, REDIS_URL (optional)
+
+4. (Optional) Set region close to your users (e.g., sin1) via vercel.json.
+5. Click Deploy.
+
+#### Option B — Vercel CLI
 
 ```bash
-gcloud builds submit --tag gcr.io/PROJECT/favget
-gcloud run deploy favget --image gcr.io/PROJECT/favget --platform managed --region asia-southeast2
+vercel                                   # first-time setup (preview)
+vercel --prod                            # deploy to production
 ```
+
+Your public endpoint will be:
+
+```text
+https://<your-vercel-domain>/v1/icon?domain=github.com
+```
+
+### 5. vercel.json
+
+This repo uses the following `vercel.json`:
+
+```json
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "routes": [{ "src": "^/v1/icon$", "dest": "/api/v1/icon" }],
+  "build": {
+    "env": {
+      "GO_BUILD_FLAGS": "-ldflags '-s -w'"
+    }
+  }
+}
+```
+
+- routes: rewrites `/v1/icon` → `/api/v1/icon`
+- `build.env.GO_BUILD_FLAGS`: optimizes Go binary size
 
 ## 📊 Database Schema
 
@@ -151,4 +195,4 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-Built with ❤️ using Go, Fly.io, Neon, Upstash, and Cloudinary.
+Built with ❤️ using Go, Vercel, Neon, Upstash, and Cloudinary.

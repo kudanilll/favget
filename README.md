@@ -26,10 +26,16 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
 ## 📐 Architecture
 
 ```text
-Client → Favget (Vercel Function)
-  ↳ Redis (Upstash) – fast cache lookup
-  ↳ Postgres (Neon) – metadata persistence
-  ↳ Cloudinary – optimized icon storage & CDN delivery
+Client → /api/v1/icon (Vercel)
+  api/index.go:
+    once init (config, store, cache, cloud)
+    strip "/api"
+    → app.ServeHTTP(...)
+  internal/http.Routes():
+    /v1/icon handler:
+      → resolver.ResolveBestIcon()
+      → (optional) cache Redis / DB Neon
+      → cloud (Cloudinary) → redirect 302 ke URL fetch
 ```
 
 ## 🚦 API Endpoints
@@ -89,17 +95,19 @@ vercel dev
 
 #### Test:
 
+1. Local Server
+
 ```bash
-curl -i "http://localhost:3000/v1/icon?domain=github.com"
+go run ./cmd/server
+curl -i "http://localhost:8080/v1/icon?domain=github.com"
 ```
 
-> If you also keep a standalone Go server under cmd/server, you can still run:
->
-> ```bash
-> go run ./cmd/server
-> ```
->
-> but Vercel deploy uses the /api function version.
+2. Vercel dev
+
+```bash
+vercel dev
+curl -i "http://localhost:3000/v1/icon?domain=github.com"
+```
 
 ### 4. Deploy to Vercel
 
@@ -135,7 +143,10 @@ This repo uses the following `vercel.json`:
 ```json
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "routes": [{ "src": "^/v1/icon$", "dest": "/api/v1/icon" }],
+  "routes": [
+    { "src": "^/v1/(.*)$", "dest": "/api/index" },
+    { "src": "^/healthz$", "dest": "/api/index" }
+  ],
   "build": {
     "env": {
       "GO_BUILD_FLAGS": "-ldflags '-s -w'"

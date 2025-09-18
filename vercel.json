@@ -1,6 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "routes": [{ "src": "^/v1/icon$", "dest": "/api/v1/icon" }],
+  "routes": [
+    { "src": "^/v1/(.*)$", "dest": "/api/index" },
+    { "src": "^/healthz$", "dest": "/api/index" }
+  ],
   "build": {
     "env": {
       "GO_BUILD_FLAGS": "-ldflags '-s -w'"

@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS icons (
 ```text
 MIT License
 
-Copyright (c) 2025 kudanilll.
+Copyright (c) 2025 Achmad Daniel Syahputra
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

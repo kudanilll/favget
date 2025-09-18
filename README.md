@@ -25,18 +25,52 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
 
 ## 📐 Architecture
 
-```text
-Client → /api/v1/icon (Vercel)
-  api/index.go:
-    once init (config, store, cache, cloud)
-    strip "/api"
-    → app.ServeHTTP(...)
-  internal/http.Routes():
-    /v1/icon handler:
-      → resolver.ResolveBestIcon()
-      → (optional) cache Redis / DB Neon
-      → cloud (Cloudinary) → redirect 302 ke URL fetch
-```
+- **Request Path**
+
+  - **Client → Vercel Function** (`/api/index.go`) → **`pkg/app.NewHandler()`** → **`internal/http.Routes()`** (chi router) → endpoints (e.g. `/v1/icon`, `/healthz`).
+  - The Vercel bridge strips the `/api` prefix before passing the request to the internal router, so internal routes remain `/v1/...`.
+
+- **One-Time Initialization (lazy via `sync.Once`)**
+
+  - `internal/config`: reads env (`CLOUDINARY_URL`, `DATABASE_URL`, `REDIS_URL`, `APP_ENV=production`, `CACHE_TTL_SECONDS`, etc.).
+  - `internal/store`: creates a pooled **Neon Postgres** connection.
+  - `internal/cache`: sets up **Upstash Redis**.
+  - `internal/cloud`: configures **Cloudinary** from `CLOUDINARY_URL`.
+  - `pkg/app`: composes the above and returns an `http.Handler` from `internal/http`.
+
+- **Request Flow: `GET /v1/icon?domain=...`**
+
+  1. **Normalize domain** via `internal/resolver`.
+  2. **Check Redis cache**: key `icon:<domain>`.
+
+     - **HIT** → respond **302 Redirect** to the cached Cloudinary URL.
+     - **MISS** → continue.
+
+  3. **Resolve icon** via `internal/resolver`:
+
+     - Parse HTML `<link rel="icon">`, `apple-touch-icon`, `mask-icon`; fallback to `/favicon.ico`.
+
+  4. **Cloud delivery** via `internal/cloud`:
+
+     - Build a **Cloudinary Remote Fetch** URL
+       `https://res.cloudinary.com/<cloud>/image/fetch/f_auto,q_auto/<source_url>`.
+
+  5. **Persist & cache**:
+
+     - Upsert metadata in **Postgres** (`icons` table).
+     - Store Cloudinary URL in **Redis** with TTL (`CACHE_TTL_SECONDS`).
+
+  6. **Respond**: **302 Redirect** to Cloudinary with `Cache-Control` and permissive CORS.
+
+- **Routing & Deployment**
+
+  - Public access: `/api/v1/icon` by default.
+  - Optional rewrites in `vercel.json` map `/v1/*` and `/healthz` → `/api/index`.
+
+- **Data Model & Cache**
+
+  - **Postgres `icons`**: `domain` (PK), `icon_url` (Cloudinary), `source_url`, `etag`, `width`, `height`, `content_type`, `updated_at`.
+  - **Redis**: `icon:<domain>` → `icon_url` (TTL = `CACHE_TTL_SECONDS`).
 
 ## 🚦 API Endpoints
 

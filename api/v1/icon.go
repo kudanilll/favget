@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,7 +27,7 @@ var hrefRe  = regexp.MustCompile(`(?i)href=["']([^"']+)["']`)
 func resolveIcon(domain string) (string, error) {
 	base := "https://" + domain
 
-	// coba baca sebagian kecil HTML (hemat)
+	// take part of the homepage HTML (save)
 	if resp, err := http.Get(base); err == nil && resp.StatusCode < 400 {
 		buf := make([]byte, 128*1024)
 		n, _ := resp.Body.Read(buf)
@@ -56,7 +57,18 @@ func resolveIcon(domain string) (string, error) {
 	return "", errors.New("icon not found")
 }
 
-// Handler is required by Vercel's Go runtime
+func cloudNameFromCloudinaryURL(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid CLOUDINARY_URL: %w", err)
+	}
+	if u.Scheme != "cloudinary" || u.Host == "" {
+		return "", fmt.Errorf("invalid CLOUDINARY_URL: want scheme cloudinary and host as cloud name")
+	}
+	return u.Host, nil // host = cloud name
+}
+
+// Vercel Go runtime: exported Handler(http.ResponseWriter, *http.Request)
 func Handler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -79,12 +91,18 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cloud := os.Getenv("CLOUDINARY_URL")
-	if cloud == "" {
+	raw := os.Getenv("CLOUDINARY_URL")
+	if raw == "" {
 		http.Error(w, "missing CLOUDINARY_URL", http.StatusInternalServerError)
 		return
 	}
+	cloud, err := cloudNameFromCloudinaryURL(raw)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
+	// Cloudinary remote fetch delivery
 	cld := "https://res.cloudinary.com/" + cloud +
 		"/image/fetch/f_auto,q_auto/" + url.QueryEscape(src)
 

@@ -85,28 +85,18 @@ echo ".env" >> .gitignore
 
 ### 3. Run locally
 
-#### Using Vercel CLI (recommended):
-
-```bash
-npm i -g vercel
-vercel dev
-# opens http://localhost:3000
-```
-
-#### Test:
-
-1. Local Server
-
-```bash
-go run ./cmd/server
-curl -i "http://localhost:8080/v1/icon?domain=github.com"
-```
-
-2. Vercel dev
+#### Using Vercel CLI:
 
 ```bash
 vercel dev
 curl -i "http://localhost:3000/v1/icon?domain=github.com"
+```
+
+#### Local Server:
+
+```bash
+go run ./cmd/server
+curl -i "http://localhost:8080/v1/icon?domain=github.com"
 ```
 
 ### 4. Deploy to Vercel

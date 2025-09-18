@@ -79,9 +79,9 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cloud := os.Getenv("CLOUDINARY_CLOUD_NAME")
+	cloud := os.Getenv("CLOUDINARY_URL")
 	if cloud == "" {
-		http.Error(w, "missing CLOUDINARY_CLOUD_NAME", http.StatusInternalServerError)
+		http.Error(w, "missing CLOUDINARY_URL", http.StatusInternalServerError)
 		return
 	}
 

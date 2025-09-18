@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS icons (
 - Rate limiting middleware
 - Background refresh jobs
 
-## Support and Contribute
+## ☕ Support
 
 If you appreciate my work, you can [**buy me a coffee**](https://www.buymeacoffee.com/kudanil) and share your feedback! Your support helps me continue to improve Favget.
 

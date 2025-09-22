@@ -12,6 +12,7 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
 - 🌍 **Simple hosting** – Deployable on **Vercel** using Go Serverless Functions.
 - 🔒 **Rate limiting (optional)** – Per-IP/per-domain control via Redis.
 - 📦 **API-first** – Simple endpoints for fetching icons or metadata.
+- 🔐 **API key protection (required)** – All non-health endpoints require a valid API key.
 
 ## 🛠️ Tech Stack
 
@@ -37,6 +38,7 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
   - `internal/cache`: sets up **Upstash Redis**.
   - `internal/cloud`: configures **Cloudinary** from `CLOUDINARY_URL`.
   - `pkg/app`: composes the above and returns an `http.Handler` from `internal/http`.
+  - `internal/http`: applies **API key middleware** to protected routes (see **Authentication**).
 
 - **Request Flow: `GET /v1/icon?domain=...`**
 
@@ -72,13 +74,53 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
   - **Postgres `icons`**: `domain` (PK), `icon_url` (Cloudinary), `source_url`, `etag`, `width`, `height`, `content_type`, `updated_at`.
   - **Redis**: `icon:<domain>` → `icon_url` (TTL = `CACHE_TTL_SECONDS`).
 
+## 🔐 Authentication (API Key)
+
+All non-health endpoints require a valid API key.
+
+- **Header (recommended):**
+  - `Authorization: Bearer <API_KEY>`
+  - or `X-API-Key: <API_KEY>`
+- **Query param (discouraged; for quick tests only):**
+  - `?api_key=<API_KEY>` or `?apikey=<API_KEY>`
+
+**Error codes**
+
+- Missing/invalid key → `401 Unauthorized` (with `WWW-Authenticate` header).
+
+**Key management**
+
+- Configure the key via environment variable `API_KEY`.
+- You can **rotate keys** by comma-separating them:  
+  `API_KEY="old_key,new_key"` (both accepted until you remove the old one).
+
+> **Security tips**
+>
+> - Prefer the `Authorization: Bearer` header over query params (query values may end up in logs and browser history).
+> - Rotate keys by comma-separating values in `API_KEY` during the rollout window.
+> - Health checks can stay public (`/healthz`); move them behind the middleware if you require full lockdown.
+
 ## 🚦 API Endpoints
 
-- `GET /v1/icon?domain=example.com`
-  → Redirects (302) to Cloudinary URL for <img> usage.
+> All endpoints below **require a valid API key** unless explicitly noted.
+
+- `GET /v1/icon?domain=example.com`  
+  → Redirects (302) to a Cloudinary URL (suitable for `<img>`).  
+  **Auth:** required  
+  **Example:**
+
+  ```bash
+  curl -i "https://<your-vercel-domain>/v1/icon?domain=github.com" \
+    -H "Authorization: Bearer <API_KEY>"
+  ```
+
+- `GET /healthz`
+  → Health probe.
+  **Auth:** not required
 
 - `POST /v1/refresh (protected)`
   → Forces re-crawl and refresh of icon.
+  **Auth:** required
 
 > Default route on Vercel is /api/v1/icon. This repo uses vercel.json to rewrite /v1/icon → /api/v1/icon so your public URL stays clean.
 
@@ -103,13 +145,19 @@ cp .env.example .env
 
 ```bash
 PORT=8080
+# Required runtime configuration
+API_KEY=your-long-random-key # or multiple: key1,key2,key3
+CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME
 DATABASE_URL=postgres://user:pass@host:port/db?sslmode=require
 REDIS_URL=rediss://default:password@host:port
-CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME
-APP_ENV=dev
+
+# App tuning
+APP_ENV=production
 CACHE_TTL_SECONDS=86400
 RATE_LIMIT_RPS=10
 ```
+
+> Note: Your current code treats DATABASE_URL and REDIS_URL as required (it exits if missing). If you want them to be optional, you’ll need to relax the checks in internal/config (replace mustGet with a default/optional strategy).
 
 #### 2.3 Make sure `.env` is ignored by git:
 
@@ -141,8 +189,11 @@ curl -i "http://localhost:8080/v1/icon?domain=github.com"
 2. Import the repo in Vercel Dashboard.
 3. In Settings → Environment Variables, add:
 
-   - CLOUDINARY_CLOUD_NAME (required)
-   - DATABASE_URL, REDIS_URL (optional)
+   - **API_KEY** (required) — your API key, or multiple keys comma-separated
+   - **CLOUDINARY_URL** (required) — `cloudinary://API_KEY:API_SECRET@CLOUD_NAME`
+   - **DATABASE_URL** (required) — Neon/Postgres pooled connection string
+   - **REDIS_URL** (required) — Upstash Redis URL
+   - **APP_ENV** (recommended) — `production`
 
 4. (Optional) Set region close to your users (e.g., sin1) via vercel.json.
 5. Click Deploy.

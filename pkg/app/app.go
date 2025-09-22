@@ -29,6 +29,12 @@ func NewHandler() (http.Handler, error) {
 		return nil, err
 	}
 
-	s := &httpx.Server{DB: db, Cache: cch, CLD: cld}
+	s := &httpx.Server{
+		DB:      db,
+		Cache:   cch,
+		CLD:     cld,
+		APIKeys: cfg.APIKeys,
+	}
+	
 	return s.Routes(), nil
 }

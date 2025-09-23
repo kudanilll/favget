@@ -2,7 +2,10 @@ package httpx
 
 import (
 	"context"
+	"encoding/json"
+	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,6 +30,9 @@ type Server struct {
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 
+	// Root route: human & machine-friendly service index
+	r.Get("/", s.handleRoot)
+
 	// --- Public endpoints (no API key required) ---
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -39,12 +45,104 @@ func (s *Server) Routes() http.Handler {
 
 		// Main icon endpoint
 		sr.Get("/v1/icon", s.handleIcon)
-
-		// Add other protected endpoints here, e.g.:
-		// sr.Post("/v1/refresh", s.handleRefresh)
 	})
 
 	return r
+}
+
+// handleRoot serves a compact index of the service: author/contact,
+// available routes, and auth requirements. JSON is the default response.
+// Pass `?format=html` (or Accept: text/html) for a tiny HTML page.
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	authorName := "Achmad Daniel Syahputra"
+	authorURL  := "https://www.kudaniel.my.id"
+	repoURL    := "https://github.com/kudanilll/favget"
+	env        := "production"
+
+	type route struct {
+		Method      string `json:"method"`
+		Path        string `json:"path"`
+		Auth        string `json:"auth"`
+		Description string `json:"description"`
+		Example     string `json:"example,omitempty"`
+	}
+	payload := struct {
+		Service string  `json:"service"`
+		Env     string  `json:"env"`
+		Author  string  `json:"author"`
+		Contact string  `json:"contact"`
+		Repo    string  `json:"repo"`
+		Routes  []route `json:"routes"`
+	}{
+		Service: "Favget",
+		Env:     env,
+		Author:  authorName,
+		Contact: authorURL,
+		Repo:    repoURL,
+		Routes: []route{
+			{
+				Method:      "GET",
+				Path:        "/healthz",
+				Auth:        "none",
+				Description: "Health probe",
+			},
+			{
+				Method:      "GET",
+				Path:        "/v1/icon",
+				Auth:        "required (API key)",
+				Description: "Resolve best icon for a domain and redirect to optimized Cloudinary URL",
+				Example:     `curl -i "https://<host>/v1/icon?domain=github.com" -H "Authorization: Bearer <API_KEY>"`,
+			},
+		},
+	}
+
+	// Switch to a minimal HTML view if requested by Accept or query param.
+	if strings.Contains(r.Header.Get("Accept"), "text/html") || r.URL.Query().Get("format") == "html" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		const tpl = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Favget · Service Index</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;margin:2rem;line-height:1.45}
+code{background:#f3f4f6;padding:.15rem .35rem;border-radius:.35rem}
+h1{margin:.2rem 0 1rem}
+small{color:#6b7280}
+.section{margin:1.2rem 0}
+.route{margin:.5rem 0;padding:.6rem .8rem;border:1px solid #e5e7eb;border-radius:.5rem}
+.k{color:#374151}
+.v{color:#111827;font-weight:600}
+</style>
+</head><body>
+<h1>Favget <small>· {{.Env}}</small></h1>
+<div class="section">
+  <div class="k">Author:</div>
+  <div class="v"><a href="{{.Contact}}" target="_blank" rel="noreferrer">{{.Author}}</a></div>
+  <div class="k" style="margin-top:.4rem">Repository:</div>
+  <div class="v"><a href="{{.Repo}}" target="_blank" rel="noreferrer">{{.Repo}}</a></div>
+</div>
+
+<div class="section">
+  <div class="k">Routes:</div>
+  {{range .Routes}}
+    <div class="route">
+      <div><b>{{.Method}}</b> <code>{{.Path}}</code></div>
+      <div><small>Auth: {{.Auth}}</small></div>
+      {{if .Description}}<div style="margin-top:.25rem">{{.Description}}</div>{{end}}
+      {{if .Example}}<div style="margin-top:.4rem"><code>{{.Example}}</code></div>{{end}}
+    </div>
+  {{end}}
+</div>
+</body></html>`
+		t := template.Must(template.New("index").Parse(tpl))
+		_ = t.Execute(w, payload)
+		return
+	}
+
+	// Default: JSON
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 // handleIcon resolves the best icon for the given domain, uploads (remote fetch)

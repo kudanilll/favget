@@ -118,10 +118,6 @@ All non-health endpoints require a valid API key.
   → Health probe.
   **Auth:** not required
 
-- `POST /v1/refresh (protected)`
-  → Forces re-crawl and refresh of icon.
-  **Auth:** required
-
 > Default route on Vercel is /api/v1/icon. This repo uses vercel.json to rewrite /v1/icon → /api/v1/icon so your public URL stays clean.
 
 ## ⚡ Quickstart

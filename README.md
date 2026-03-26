@@ -9,7 +9,7 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
 - 🚀 **Fast delivery** – Optionally cache hot results in Redis (Upstash) for instant subsequent fetches.
 - ☁️ **Cloud delivery** – Icons are delivered & optimized via Cloudinary (`f_auto`, `q_auto`) using remote fetch.
 - 🗄️ **Persistent storage (optional)** – Store metadata in Neon (Postgres) for consistency and revalidation.
-- 🌍 **Simple hosting** – Deployable on **Vercel** using Go Serverless Functions.
+- 🌍 **Simple hosting** – Deployable via Docker or any Go-compatible server.
 - 🔒 **Rate limiting (optional)** – Per-IP/per-domain control via Redis.
 - 📦 **API-first** – Simple endpoints for fetching icons or metadata.
 - 🔐 **API key protection (required)** – All non-health endpoints require a valid API key.
@@ -17,21 +17,19 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
 ## 🛠️ Tech Stack
 
 - **Language:** [Go](https://go.dev/)
-- **Runtime:** Vercel Go Serverless Functions
 - **Framework:** [chi](https://github.com/go-chi/chi) (lightweight HTTP router)
 - **Database (optional):** [Neon Postgres](https://neon.tech/)
 - **Cache (optional):** [Upstash Redis](https://upstash.com/)
 - **Storage/CDN:** [Cloudinary](https://cloudinary.com/)
-- **Hosting:** [Vercel](https://vercel.com/)
+- **Hosting:** Docker / any Go-compatible server
 
 ## 📐 Architecture
 
 - **Request Path**
 
-  - **Client → Vercel Function** (`/api/index.go`) → **`pkg/app.NewHandler()`** → **`internal/http.Routes()`** (chi router) → endpoints (e.g. `/v1/icon`, `/healthz`).
-  - The Vercel bridge strips the `/api` prefix before passing the request to the internal router, so internal routes remain `/v1/...`.
+  - **Client → `cmd/server`** → **`pkg/app.NewHandler()`** → **`internal/http.Routes()`** (chi router) → endpoints (e.g. `/v1/icon`, `/healthz`).
 
-- **One-Time Initialization (lazy via `sync.Once`)**
+- **One-Time Initialization**
 
   - `internal/config`: reads env (`CLOUDINARY_URL`, `DATABASE_URL`, `REDIS_URL`, `APP_ENV=production`, `CACHE_TTL_SECONDS`, etc.).
   - `internal/store`: creates a pooled **Neon Postgres** connection.
@@ -63,11 +61,6 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
      - Store Cloudinary URL in **Redis** with TTL (`CACHE_TTL_SECONDS`).
 
   6. **Respond**: **302 Redirect** to Cloudinary with `Cache-Control` and permissive CORS.
-
-- **Routing & Deployment**
-
-  - Public access: `/api/v1/icon` by default.
-  - Optional rewrites in `vercel.json` map `/v1/*` and `/healthz` → `/api/index`.
 
 - **Data Model & Cache**
 
@@ -110,15 +103,13 @@ All non-health endpoints require a valid API key.
   **Example:**
 
   ```bash
-  curl -i "https://<your-vercel-domain>/v1/icon?domain=github.com" \
+  curl -i "http://localhost:8080/v1/icon?domain=github.com" \
     -H "Authorization: Bearer <API_KEY>"
   ```
 
 - `GET /healthz`
   → Health probe.
   **Auth:** not required
-
-> Default route on Vercel is /api/v1/icon. This repo uses vercel.json to rewrite /v1/icon → /api/v1/icon so your public URL stays clean.
 
 ## ⚡ Quickstart
 
@@ -163,71 +154,32 @@ echo ".env" >> .gitignore
 
 ### 3. Run locally
 
-#### Using Vercel CLI:
-
-```bash
-vercel dev
-curl -i "http://localhost:3000/v1/icon?domain=github.com"
-```
-
-#### Local Server:
-
 ```bash
 go run ./cmd/server
 curl -i "http://localhost:8080/v1/icon?domain=github.com"
 ```
 
-### 4. Deploy to Vercel
-
-#### Option A — GitHub integration (recommended)
-
-1. Push this repo to GitHub.
-2. Import the repo in Vercel Dashboard.
-3. In Settings → Environment Variables, add:
-
-   - **API_KEY** (required) — your API key, or multiple keys comma-separated
-   - **CLOUDINARY_URL** (required) — `cloudinary://API_KEY:API_SECRET@CLOUD_NAME`
-   - **DATABASE_URL** (required) — Neon/Postgres pooled connection string
-   - **REDIS_URL** (required) — Upstash Redis URL
-   - **APP_ENV** (recommended) — `production`
-
-4. (Optional) Set region close to your users (e.g., sin1) via vercel.json.
-5. Click Deploy.
-
-#### Option B — Vercel CLI
+Or using the Makefile:
 
 ```bash
-vercel                                   # first-time setup (preview)
-vercel --prod                            # deploy to production
+make run
 ```
 
-Your public endpoint will be:
+### 4. Run with Docker
+
+```bash
+# Build the image
+make docker-build
+
+# Run the container
+make docker-run
+```
+
+Your local endpoint will be:
 
 ```text
-https://<your-vercel-domain>/v1/icon?domain=github.com
+http://localhost:8080/v1/icon?domain=github.com
 ```
-
-### 5. vercel.json
-
-This repo uses the following `vercel.json`:
-
-```json
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "routes": [
-    { "src": "^/v1/(.*)$", "dest": "/api/index" },
-    { "src": "^/healthz$", "dest": "/api/index" }
-  ],
-  "build": {
-    "env": {
-      "GO_BUILD_FLAGS": "-ldflags '-s -w'"
-    }
-  }
-}
-```
-
-- routes: rewrites `/v1/icon` → `/api/v1/icon`
-- `build.env.GO_BUILD_FLAGS`: optimizes Go binary size
 
 ## 📊 Database Schema
 
@@ -281,4 +233,4 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-Built with ❤️ using Go, Vercel, Neon, Upstash, and Cloudinary.
+Built with ❤️ using Go, Neon, Upstash, and Cloudinary.

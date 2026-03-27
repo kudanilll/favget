@@ -10,7 +10,7 @@ import (
 type Config struct {
 	Port             string
 	DatabaseURL      string
-	RedisURL         string
+	RedisURL         string // optional; empty = caching disabled
 	CloudinaryURL    string
 	Env              string
 	RateLimitRPS     int
@@ -90,7 +90,7 @@ func Load() Config {
 	return Config{
 		Port:          getDefault("PORT", "8080"),
 		DatabaseURL:   mustGet("DATABASE_URL"),
-		RedisURL:      mustGet("REDIS_URL"),
+		RedisURL:      getDefault("REDIS_URL", ""), // optional – omit to disable caching
 		CloudinaryURL: mustGet("CLOUDINARY_URL"),
 		Env:           env,
 		RateLimitRPS:  rl,

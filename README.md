@@ -1,29 +1,20 @@
 # Favget
 
-Favget is a high-performance backend service for fetching and delivering favicons (and other website icons) with global caching and CDN support.
+Favget is a high-performance backend service for fetching and delivering favicons (and other website icons) with CDN support.
 It is designed to be **fast, reliable, and scalable** — ideal for projects that need to resolve, cache, and serve icons for multiple domains.
 
-## ✨ Features
+## Features
 
-- 🔍 **Smart resolver** – Parses HTML `<link rel="icon">`, `apple-touch-icon`, `mask-icon`, and falls back to `/favicon.ico`.
-- 🚀 **Fast delivery** – Optionally cache hot results in Redis (Upstash) for instant subsequent fetches.
-- ☁️ **Cloud delivery** – Icons are delivered & optimized via Cloudinary (`f_auto`, `q_auto`) using remote fetch.
-- 🗄️ **Persistent storage (optional)** – Store metadata in Neon (Postgres) for consistency and revalidation.
-- 🌍 **Simple hosting** – Deployable via Docker or any Go-compatible server.
-- 🔒 **Rate limiting (optional)** – Per-IP/per-domain control via Redis.
-- 📦 **API-first** – Simple endpoints for fetching icons or metadata.
-- 🔐 **API key protection (required)** – All non-health endpoints require a valid API key.
+- **Smart resolver** — Parses HTML `<link rel="icon">`, `apple-touch-icon`, `mask-icon`, and falls back to `/favicon.ico`.
+- **Fast delivery** — Optionally cache results in Redis for instant subsequent fetches.
+- **Cloud delivery** — Icons are delivered and optimized via Cloudinary (`f_auto`, `q_auto`) using remote fetch.
+- **Persistent storage (optional)** — Store metadata in Neon (Postgres) for consistency and revalidation.
+- **Simple hosting** — Deployable via Docker or any Go-compatible server.
+- **Rate limiting (optional)** — Per-IP/per-domain control via Redis.
+- **API-first** — Simple endpoints for fetching icons or metadata.
+- **API key protection (required)** — All non-health endpoints require a valid API key.
 
-## 🛠️ Tech Stack
-
-- **Language:** [Go](https://go.dev/)
-- **Framework:** [chi](https://github.com/go-chi/chi) (lightweight HTTP router)
-- **Database (optional):** [Neon Postgres](https://neon.tech/)
-- **Cache (optional):** [Upstash Redis](https://upstash.com/)
-- **Storage/CDN:** [Cloudinary](https://cloudinary.com/)
-- **Hosting:** Docker / any Go-compatible server
-
-## 📐 Architecture
+## Architecture
 
 - **Request Path**
 
@@ -31,9 +22,9 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
 
 - **One-Time Initialization**
 
-  - `internal/config`: reads env (`CLOUDINARY_URL`, `DATABASE_URL`, `REDIS_URL`, `APP_ENV=production`, `CACHE_TTL_SECONDS`, etc.).
+  - `internal/config`: reads env (`CLOUDINARY_URL`, `DATABASE_URL`, `REDIS_URL`, `APP_ENV`, `CACHE_TTL_SECONDS`, etc.).
   - `internal/store`: creates a pooled **Neon Postgres** connection.
-  - `internal/cache`: sets up **Upstash Redis**.
+  - `internal/cache`: sets up **Upstash Redis** if `REDIS_URL` is set; otherwise acts as a no-op.
   - `internal/cloud`: configures **Cloudinary** from `CLOUDINARY_URL`.
   - `pkg/app`: composes the above and returns an `http.Handler` from `internal/http`.
   - `internal/http`: applies **API key middleware** to protected routes (see **Authentication**).
@@ -41,33 +32,24 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
 - **Request Flow: `GET /v1/icon?domain=...`**
 
   1. **Normalize domain** via `internal/resolver`.
-  2. **Check Redis cache**: key `icon:<domain>`.
-
+  2. **Check Redis cache** (if enabled): key `icon:<domain>`.
      - **HIT** → respond **302 Redirect** to the cached Cloudinary URL.
-     - **MISS** → continue.
-
+     - **MISS or disabled** → continue.
   3. **Resolve icon** via `internal/resolver`:
-
      - Parse HTML `<link rel="icon">`, `apple-touch-icon`, `mask-icon`; fallback to `/favicon.ico`.
-
   4. **Cloud delivery** via `internal/cloud`:
-
-     - Build a **Cloudinary Remote Fetch** URL
-       `https://res.cloudinary.com/<cloud>/image/fetch/f_auto,q_auto/<source_url>`.
-
-  5. **Persist & cache**:
-
+     - Build a **Cloudinary Remote Fetch** URL: `https://res.cloudinary.com/<cloud>/image/fetch/f_auto,q_auto/<source_url>`.
+  5. **Persist and cache**:
      - Upsert metadata in **Postgres** (`icons` table).
-     - Store Cloudinary URL in **Redis** with TTL (`CACHE_TTL_SECONDS`).
-
+     - Store Cloudinary URL in **Redis** with TTL (`CACHE_TTL_SECONDS`), if Redis is configured.
   6. **Respond**: **302 Redirect** to Cloudinary with `Cache-Control` and permissive CORS.
 
-- **Data Model & Cache**
+- **Data Model**
 
   - **Postgres `icons`**: `domain` (PK), `icon_url` (Cloudinary), `source_url`, `etag`, `width`, `height`, `content_type`, `updated_at`.
-  - **Redis**: `icon:<domain>` → `icon_url` (TTL = `CACHE_TTL_SECONDS`).
+  - **Redis** (optional): `icon:<domain>` → `icon_url` (TTL = `CACHE_TTL_SECONDS`).
 
-## 🔐 Authentication (API Key)
+## Authentication (API Key)
 
 All non-health endpoints require a valid API key.
 
@@ -83,9 +65,8 @@ All non-health endpoints require a valid API key.
 
 **Key management**
 
-- Configure the key via environment variable `API_KEY`.
-- You can **rotate keys** by comma-separating them:  
-  `API_KEY="old_key,new_key"` (both accepted until you remove the old one).
+- Configure via environment variable `API_KEY`.
+- Rotate keys by comma-separating them: `API_KEY="old_key,new_key"` (both accepted until you remove the old one).
 
 > **Security tips**
 >
@@ -93,13 +74,13 @@ All non-health endpoints require a valid API key.
 > - Rotate keys by comma-separating values in `API_KEY` during the rollout window.
 > - Health checks can stay public (`/healthz`); move them behind the middleware if you require full lockdown.
 
-## 🚦 API Endpoints
+## API Endpoints
 
 > All endpoints below **require a valid API key** unless explicitly noted.
 
-- `GET /v1/icon?domain=example.com`  
-  → Redirects (302) to a Cloudinary URL (suitable for `<img>`).  
-  **Auth:** required  
+- `GET /v1/icon?domain=example.com`
+  → Redirects (302) to a Cloudinary URL (suitable for `<img>`).
+  **Auth:** required
   **Example:**
 
   ```bash
@@ -111,7 +92,7 @@ All non-health endpoints require a valid API key.
   → Health probe.
   **Auth:** not required
 
-## ⚡ Quickstart
+## Quickstart
 
 ### 1. Clone the repository
 
@@ -122,31 +103,32 @@ cd favget
 
 ### 2. Set environment variables
 
-#### 2.1 Copy the sample and fill your credentials:
+Copy the sample and fill in your credentials:
 
 ```bash
 cp .env.example .env
 ```
 
-#### 2.2 Edit `.env` with your credentials:
+Edit `.env`:
 
 ```bash
 PORT=8080
-# Required runtime configuration
-API_KEY=your-long-random-key # or multiple: key1,key2,key3
+
+# Required
+API_KEY=your-long-random-key   # or multiple: key1,key2,key3
 CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME
-DATABASE_URL=postgres://user:pass@host:port/db?sslmode=require
+DATABASE_URL=postgres://user:pass@host:port/db
+
+# Optional — leave empty to disable Redis caching
 REDIS_URL=rediss://default:password@host:port
 
-# App tuning
+# Tuning
 APP_ENV=production
 CACHE_TTL_SECONDS=86400
 RATE_LIMIT_RPS=10
 ```
 
-> Note: Your current code treats DATABASE_URL and REDIS_URL as required (it exits if missing). If you want them to be optional, you’ll need to relax the checks in internal/config (replace mustGet with a default/optional strategy).
-
-#### 2.3 Make sure `.env` is ignored by git:
+Make sure `.env` is ignored by git:
 
 ```bash
 echo ".env" >> .gitignore
@@ -159,29 +141,28 @@ go run ./cmd/server
 curl -i "http://localhost:8080/v1/icon?domain=github.com"
 ```
 
-Or using the Makefile:
-
-```bash
-make run
-```
-
 ### 4. Run with Docker
 
 ```bash
 # Build the image
-make docker-build
+docker build -t favget:latest .
 
 # Run the container
-make docker-run
+docker run --rm -p 8080:8080 \
+  -e PORT=8080 \
+  -e API_KEY="your-api-key" \
+  -e CLOUDINARY_URL="cloudinary://KEY:SECRET@cloud" \
+  -e DATABASE_URL="postgres://user:pass@host:port/db?sslmode=require" \
+  favget:latest
 ```
 
-Your local endpoint will be:
+Your local endpoint:
 
 ```text
 http://localhost:8080/v1/icon?domain=github.com
 ```
 
-## 📊 Database Schema
+## Database Schema
 
 ```sql
 CREATE TABLE IF NOT EXISTS icons (
@@ -196,18 +177,18 @@ CREATE TABLE IF NOT EXISTS icons (
 );
 ```
 
-## 🔮 Roadmap
+## Roadmap
 
 - Add GraphQL endpoint
-- Support multiple sizes & formats (ICO, SVG, PNG)
+- Support multiple sizes and formats (ICO, SVG, PNG)
 - Rate limiting middleware
 - Background refresh jobs
 
-## ☕ Support
+## Support
 
-If you appreciate my work, you can [**buy me a coffee**](https://www.buymeacoffee.com/kudanil) and share your feedback! Your support helps me continue to improve Favget.
+If you appreciate my work, you can [**buy me a coffee**](https://www.buymeacoffee.com/kudanil) and share your feedback!
 
-## 📄 License
+## License
 
 ```text
 MIT License
@@ -232,5 +213,3 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
-
-Built with ❤️ using Go, Neon, Upstash, and Cloudinary.

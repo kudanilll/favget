@@ -3,12 +3,15 @@ package httpx
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"html/template"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/kudanilll/favget/internal/cache"
 	"github.com/kudanilll/favget/internal/cloud"
@@ -19,11 +22,16 @@ import (
 // Server aggregates all dependencies required by HTTP handlers.
 // Keep it small and explicit so it's easy to test and reason about.
 type Server struct {
-	DB             *store.DB
-	Cache          *cache.Cache
-	CLD            *cloud.Cloud
-	APIKeys        []string // API keys enforced by middleware; empty means "no auth"
-	AllowedOrigins []string // allowed CORS origins
+	DB                  *store.DB
+	Cache               *cache.Cache
+	CLD                 *cloud.Cloud
+	Resolver            *resolver.Resolver
+	APIKeys             []string // API keys enforced by middleware; empty means "no auth"
+	AllowedOrigins      []string // allowed CORS origins
+	NegativeCacheTTLSec int      // TTL in seconds for negative cache entries
+	RateLimitRPS        int      // rate limit requests per second per IP; 0 = no limit
+
+	singleflight singleflight.Group
 }
 
 // CORS middleware for handling cross-origin requests
@@ -82,6 +90,11 @@ func (s *Server) Routes() http.Handler {
 		cr.Group(func(sr chi.Router) {
 			// Apply API-key middleware. If no keys were configured, this is a no-op.
 			sr.Use(APIKeyAuth(s.APIKeys))
+
+			// Apply rate limiting if Redis is configured and RPS > 0.
+			if s.RateLimitRPS > 0 {
+				sr.Use(RateLimitMiddleware(s.Cache, s.RateLimitRPS))
+			}
 
 			// Main icon endpoint
 			sr.Get("/v1/icon", s.handleIcon)
@@ -203,6 +216,7 @@ func (s *Server) setSecurityHeaders(w http.ResponseWriter) {
 //   - Redis GET first (hot path).
 //   - DB lookup second (warm path) with backfill into Redis.
 //   - Resolve + Upload + Upsert + Cache on miss (cold path).
+//   - Negative cache for misses to avoid repeated upstream lookups.
 func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 	s.setSecurityHeaders(w)
 	domain := r.URL.Query().Get("domain")
@@ -215,10 +229,16 @@ func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	// 1) Redis (hot path)
+	// 1) Redis (hot path) — positive cache
 	if u, err := s.Cache.Get(ctx, "icon:"+domain); err == nil && u != "" {
 		w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
 		http.Redirect(w, r, u, http.StatusFound)
+		return
+	}
+
+	// 1b) Redis — negative cache (icon was previously not found)
+	if u, err := s.Cache.Get(ctx, "icon-miss:"+domain); err == nil && u == "1" {
+		http.Error(w, "icon not found", http.StatusNotFound)
 		return
 	}
 
@@ -231,31 +251,57 @@ func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3) Resolve → Upload → Upsert → Cache (cold path)
-	src, meta, err := resolver.ResolveBestIcon(domain)
+	// Use singleflight to prevent duplicate concurrent resolves for the same domain.
+	iconURL, err := s.resolveAndUpload(domain, ctx)
 	if err != nil {
+		// Cache the miss to avoid repeated upstream lookups.
+		if s.Cache != nil {
+			negTTL := time.Duration(s.NegativeCacheTTLSec) * time.Second
+			if negTTL <= 0 {
+				negTTL = 5 * time.Minute
+			}
+			_ = s.Cache.SetWithTTL(ctx, "icon-miss:"+domain, "1", negTTL)
+		}
 		http.Error(w, "icon not found", http.StatusNotFound)
 		return
 	}
 
-	cldURL, err := s.CLD.UploadRemote(ctx, domain, src)
-	if err != nil {
-		http.Error(w, "upload failed", http.StatusBadGateway)
-		return
-	}
-
-	// Persist metadata (best-effort; the redirect should not depend on these writes)
-	_ = s.DB.Upsert(ctx, store.IconRecord{
-		Domain:      domain,
-		IconURL:     cldURL,
-		SourceURL:   meta.SourceURL,
-		ETag:        meta.ETag,
-		ContentType: meta.ContentType,
-	})
-
-	// Backfill cache
-	_ = s.Cache.Set(ctx, "icon:"+domain, cldURL)
-
 	// Final response
 	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
-	http.Redirect(w, r, cldURL, http.StatusFound)
+	http.Redirect(w, r, iconURL, http.StatusFound)
+}
+
+// resolveAndUpload deduplicates concurrent requests for the same domain using singleflight,
+// then resolves the icon, uploads to Cloudinary, persists metadata, and caches the result.
+func (s *Server) resolveAndUpload(domain string, ctx context.Context) (string, error) {
+	v, err, _ := s.singleflight.Do("icon:"+domain, func() (interface{}, error) {
+		src, meta, err := s.Resolver.ResolveBestIcon(domain)
+		if err != nil {
+			return nil, err
+		}
+
+		cldURL, err := s.CLD.UploadRemote(ctx, domain, src)
+		if err != nil {
+			log.Printf("upload failed for %s: %v", domain, err)
+			return nil, errors.New("upload failed")
+		}
+
+		// Persist metadata (best-effort; the redirect should not depend on these writes)
+		_ = s.DB.Upsert(ctx, store.IconRecord{
+			Domain:      domain,
+			IconURL:     cldURL,
+			SourceURL:   meta.SourceURL,
+			ETag:        meta.ETag,
+			ContentType: meta.ContentType,
+		})
+
+		// Backfill cache
+		_ = s.Cache.Set(ctx, "icon:"+domain, cldURL)
+
+		return cldURL, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return v.(string), nil
 }

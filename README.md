@@ -12,7 +12,10 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
 - **Simple hosting** — Deployable via Docker or any Go-compatible server.
 - **Rate limiting (optional)** — Per-IP/per-domain control via Redis.
 - **API-first** — Simple endpoints for fetching icons or metadata.
-- **API key protection (required)** — All non-health endpoints require a valid API key.
+- **API key protection (required)** — All non-health endpoints require a valid API key in production.
+- **SSRF protection** — Blocks requests to private/internal/reserved IP ranges.
+- **Negative caching** — Avoids repeated upstream lookups for domains without icons.
+- **Request deduplication** — Singleflight prevents duplicate concurrent resolves for the same domain.
 
 ## Architecture
 
@@ -24,36 +27,44 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
   - `internal/store`: creates a pooled **Neon Postgres** connection.
   - `internal/cache`: sets up **Upstash Redis** if `REDIS_URL` is set; otherwise acts as a no-op.
   - `internal/cloud`: configures **Cloudinary** from `CLOUDINARY_URL`.
+  - `internal/resolver`: builds an HTTP client with configurable TLS verification and body size limits.
   - `pkg/app`: composes the above and returns an `http.Handler` from `internal/http`.
-  - `internal/http`: applies **API key middleware** to protected routes (see **Authentication**).
+  - `internal/http`: applies **API key middleware** and **rate limiting** to protected routes (see **Authentication**).
 
 - **Request Flow: `GET /v1/icon?domain=...`**
   1. **Normalize domain** via `internal/resolver`.
   2. **Check Redis cache** (if enabled): key `icon:<domain>`.
      - **HIT** → respond **302 Redirect** to the cached Cloudinary URL.
      - **MISS or disabled** → continue.
-  3. **Resolve icon** via `internal/resolver`:
+  3. **Check negative cache**: key `icon-miss:<domain>`.
+     - **HIT** → respond **404 Not Found** immediately.
+  4. **Resolve icon** via `internal/resolver`:
      - Parse HTML `<link rel="icon">`, `apple-touch-icon`, `mask-icon`; fallback to `/favicon.ico`.
-  4. **Cloud delivery** via `internal/cloud`:
+     - Probe each candidate via HEAD (with GET fallback) with content type validation.
+  5. **Cloud delivery** via `internal/cloud`:
      - Build a **Cloudinary Remote Fetch** URL: `https://res.cloudinary.com/<cloud>/image/fetch/f_auto,q_auto/<source_url>`.
-  5. **Persist and cache**:
+  6. **Persist and cache**:
      - Upsert metadata in **Postgres** (`icons` table).
      - Store Cloudinary URL in **Redis** with TTL (`CACHE_TTL_SECONDS`), if Redis is configured.
-  6. **Respond**: **302 Redirect** to Cloudinary with `Cache-Control` and permissive CORS.
+     - On miss, cache negative result with shorter TTL (`NEGATIVE_CACHE_TTL_SECONDS`).
+  7. **Respond**: **302 Redirect** to Cloudinary with `Cache-Control` and permissive CORS.
 
 - **Data Model**
   - **Postgres `icons`**: `domain` (PK), `icon_url` (Cloudinary), `source_url`, `etag`, `width`, `height`, `content_type`, `updated_at`.
-  - **Redis** (optional): `icon:<domain>` → `icon_url` (TTL = `CACHE_TTL_SECONDS`).
+  - **Redis** (optional): `icon:<domain>` → `icon_url` (TTL = `CACHE_TTL_SECONDS`); `icon-miss:<domain>` → `1` (TTL = `NEGATIVE_CACHE_TTL_SECONDS`).
 
 ## Authentication (API Key)
 
 All non-health endpoints require a valid API key.
+**In production (`APP_ENV=production`), startup fails if no API key is configured.**
 
 - **Header (recommended):**
   - `Authorization: Bearer <API_KEY>`
   - or `X-API-Key: <API_KEY>`
 - **Query param (discouraged; for quick tests only):**
   - `?api_key=<API_KEY>` or `?apikey=<API_KEY>`
+
+> **Warning:** Query param authentication is discouraged in production because values may appear in logs and browser history. Prefer header-based authentication.
 
 ### Error codes
 
@@ -69,6 +80,40 @@ All non-health endpoints require a valid API key.
 > - Prefer the `Authorization: Bearer` header over query params (query values may end up in logs and browser history).
 > - Rotate keys by comma-separating values in `API_KEY` during the rollout window.
 > - Health checks can stay public (`/healthz`); move them behind the middleware if you require full lockdown.
+
+## Security
+
+### SSRF Protection
+
+Favget resolves domains and fetches remote resources, making SSRF a critical concern.
+The resolver blocks requests to:
+
+- **Loopback:** `127.0.0.0/8`, `::1/128`
+- **Private networks:** `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
+- **Link-local:** `169.254.0.0/16`
+- **Carrier-grade NAT:** `100.64.0.0/10`
+- **IPv6 private:** `fc00::/7`, `fe80::/10`
+- **Reserved/documentation:** `0.0.0.0/8`, `192.0.0.0/24`, `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `240.0.0.0/4`, `2001:db8::/32`, `fec0::/10`
+
+All resolved IPs are validated before fetching.
+
+### TLS Verification
+
+TLS certificate verification is **enabled by default**.
+Set `ALLOW_INSECURE_TLS=true` only if you need to fetch from sites with broken TLS.
+Enabling this disables certificate verification for all outbound requests — use with caution.
+
+### Response Body Limits
+
+HTML pages are read up to `MAX_HTML_BYTES` (default 1 MiB) to prevent abuse from oversized responses.
+
+### Content Type Validation
+
+Icon candidates are validated against a whitelist of safe image content types before acceptance.
+
+### Logging
+
+API keys, secrets, tokens, and URLs containing credentials are never logged.
 
 ## API Endpoints
 
@@ -87,6 +132,30 @@ All non-health endpoints require a valid API key.
 - `GET /healthz`
   → Health probe.
   **Auth:** not required
+
+## Environment Variables
+
+### Required
+
+| Variable         | Description                                                           | Default |
+| ---------------- | --------------------------------------------------------------------- | ------- |
+| `DATABASE_URL`   | Postgres connection string                                            | —       |
+| `CLOUDINARY_URL` | Cloudinary URL (`cloudinary://KEY:SECRET@cloud`)                      | —       |
+| `API_KEY`        | API key(s), comma-separated for rotation. **Required in production.** | —       |
+
+### Optional
+
+| Variable                     | Description                                                        | Default           |
+| ---------------------------- | ------------------------------------------------------------------ | ----------------- |
+| `PORT`                       | HTTP listen port                                                   | `8080`            |
+| `APP_ENV`                    | `dev` (development) or `production`                                | `production`      |
+| `REDIS_URL`                  | Redis connection string; omit to disable caching and rate limiting | —                 |
+| `CACHE_TTL_SECONDS`          | Positive cache TTL for resolved icons                              | `86400` (24h)     |
+| `NEGATIVE_CACHE_TTL_SECONDS` | TTL for "icon not found" cache entries                             | `300` (5min)      |
+| `RATE_LIMIT_RPS`             | Per-IP requests per second (requires Redis)                        | `10`              |
+| `ALLOW_INSECURE_TLS`         | `true` to disable TLS certificate verification                     | `false`           |
+| `MAX_HTML_BYTES`             | Max bytes to read when fetching HTML for icon parsing              | `1048576` (1 MiB) |
+| `CORS_ALLOWED_ORIGINS`       | Comma-separated list of allowed CORS origins                       | —                 |
 
 ## Quickstart
 
@@ -173,11 +242,50 @@ CREATE TABLE IF NOT EXISTS icons (
 );
 ```
 
+## Redis (Optional)
+
+Redis is **not required**. Favget works fully without it — caching and rate limiting are simply disabled.
+
+Redis is recommended when:
+
+- Traffic grows and you want to avoid repeated upstream fetches.
+- You need per-IP rate limiting.
+- You want negative caching to avoid repeated lookups for domains without icons.
+
+When `REDIS_URL` is set:
+
+- Positive cache: `icon:<domain>` with TTL = `CACHE_TTL_SECONDS`
+- Negative cache: `icon-miss:<domain>` with TTL = `NEGATIVE_CACHE_TTL_SECONDS`
+- Rate limit counters: `rl:<ip>` with 1-minute window
+
+## Development / Testing
+
+```bash
+# Run tests
+go test ./...
+
+# Format code
+gofmt -w .
+
+# Vet code
+go vet ./...
+
+# Run locally
+go run ./cmd/server
+```
+
+## Production Deployment
+
+- Set `APP_ENV=production` — this requires `API_KEY` to be set.
+- Use `Authorization: Bearer <key>` or `X-API-Key: <key>` headers.
+- Do **not** set `ALLOW_INSECURE_TLS=true` unless absolutely necessary.
+- Use a reverse proxy (nginx, Caddy, Cloudflare) in front for TLS termination.
+- Monitor the `/healthz` endpoint for uptime checks.
+- PostgreSQL is required. Redis is optional but recommended for production traffic.
+
 ## Roadmap
 
-- Add GraphQL endpoint
 - Support multiple sizes and formats (ICO, SVG, PNG)
-- Rate limiting middleware
 - Background refresh jobs
 
 ## Support

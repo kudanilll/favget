@@ -57,3 +57,8 @@ func (d *DB) Upsert(ctx context.Context, rec IconRecord) error {
 	`, rec.Domain, rec.IconURL, rec.SourceURL, rec.ETag, rec.Width, rec.Height, rec.ContentType)
 	return err
 }
+
+// Close closes the underlying connection pool.
+func (d *DB) Close() {
+	d.Pool.Close()
+}

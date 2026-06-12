@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -19,10 +20,11 @@ func main() {
 	_ = godotenv.Load(".env")
 
 	// Build the full HTTP handler tree (DB, Redis, Cloudinary, router).
-	h, err := app.NewHandler()
+	h, cleanup, err := app.NewHandler()
 	if err != nil {
 		log.Fatalf("init error: %v", err)
 	}
+	defer cleanup()
 
 	// Load config after handler (so app.NewHandler() can validate env too).
 	cfg := config.Load()
@@ -48,14 +50,13 @@ func main() {
 		}
 	}()
 
-	// Create a cancellable context bound to SIGINT (Ctrl+C).
-	// Note: On Linux containers you'll typically also want to catch SIGTERM.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// Create a cancellable context bound to SIGINT (Ctrl+C) and SIGTERM (Docker/k8s).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	select {
 	case <-ctx.Done():
-		// Received interrupt: attempt graceful shutdown with timeout.
+		// Received interrupt/term: attempt graceful shutdown with timeout.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 

@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+!.env.example
+.vercel
+*.log
+*.md
+!LICENSE
+LICENSE
+coverage/
+tmp/
+vendor/

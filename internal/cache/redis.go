@@ -45,3 +45,19 @@ func (c *Cache) Set(ctx context.Context, key, val string) error {
 	}
 	return c.RDB.Set(ctx, key, val, c.ttl).Err()
 }
+
+// SetWithTTL stores val with an explicit TTL. Useful for negative caching.
+func (c *Cache) SetWithTTL(ctx context.Context, key, val string, ttl time.Duration) error {
+	if c.RDB == nil {
+		return nil
+	}
+	return c.RDB.Set(ctx, key, val, ttl).Err()
+}
+
+// Close closes the underlying Redis client if configured.
+func (c *Cache) Close() error {
+	if c.RDB == nil {
+		return nil
+	}
+	return c.RDB.Close()
+}

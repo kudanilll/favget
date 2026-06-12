@@ -17,11 +17,9 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
 ## Architecture
 
 - **Request Path**
-
   - **Client → `cmd/server`** → **`pkg/app.NewHandler()`** → **`internal/http.Routes()`** (chi router) → endpoints (e.g. `/v1/icon`, `/healthz`).
 
 - **One-Time Initialization**
-
   - `internal/config`: reads env (`CLOUDINARY_URL`, `DATABASE_URL`, `REDIS_URL`, `APP_ENV`, `CACHE_TTL_SECONDS`, etc.).
   - `internal/store`: creates a pooled **Neon Postgres** connection.
   - `internal/cache`: sets up **Upstash Redis** if `REDIS_URL` is set; otherwise acts as a no-op.
@@ -30,7 +28,6 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
   - `internal/http`: applies **API key middleware** to protected routes (see **Authentication**).
 
 - **Request Flow: `GET /v1/icon?domain=...`**
-
   1. **Normalize domain** via `internal/resolver`.
   2. **Check Redis cache** (if enabled): key `icon:<domain>`.
      - **HIT** → respond **302 Redirect** to the cached Cloudinary URL.
@@ -45,7 +42,6 @@ It is designed to be **fast, reliable, and scalable** — ideal for projects tha
   6. **Respond**: **302 Redirect** to Cloudinary with `Cache-Control` and permissive CORS.
 
 - **Data Model**
-
   - **Postgres `icons`**: `domain` (PK), `icon_url` (Cloudinary), `source_url`, `etag`, `width`, `height`, `content_type`, `updated_at`.
   - **Redis** (optional): `icon:<domain>` → `icon_url` (TTL = `CACHE_TTL_SECONDS`).
 
@@ -59,11 +55,11 @@ All non-health endpoints require a valid API key.
 - **Query param (discouraged; for quick tests only):**
   - `?api_key=<API_KEY>` or `?apikey=<API_KEY>`
 
-**Error codes**
+### Error codes
 
 - Missing/invalid key → `401 Unauthorized` (with `WWW-Authenticate` header).
 
-**Key management**
+### Key management
 
 - Configure via environment variable `API_KEY`.
 - Rotate keys by comma-separating them: `API_KEY="old_key,new_key"` (both accepted until you remove the old one).

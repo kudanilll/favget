@@ -11,9 +11,9 @@ import (
 // How it works:
 //   - If "keys" is empty, the middleware becomes a no-op (backward compatible).
 //   - Otherwise, the request must present a valid key using one of:
-//       1) Header: Authorization: Bearer <key>  (preferred)
-//       2) Header: X-API-Key: <key>
-//       3) Query string: ?api_key=<key> or ?apikey=<key>  (discouraged)
+//     1) Header: Authorization: Bearer <key>  (preferred)
+//     2) Header: X-API-Key: <key>
+//     3) Query string: ?api_key=<key> or ?apikey=<key>  (discouraged)
 //
 // Notes:
 //   - Comparison is constant-time to avoid timing side channels.

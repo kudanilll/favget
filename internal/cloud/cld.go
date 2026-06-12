@@ -16,7 +16,9 @@ type Cloud struct {
 
 func New(cloudinaryURL string) (*Cloud, error) {
 	c, err := cloudinary.NewFromURL(cloudinaryURL)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return &Cloud{cld: c}, nil
 }
 
@@ -28,9 +30,11 @@ func publicID(domain, src string) string {
 func (c *Cloud) UploadRemote(ctx context.Context, domain, srcURL string) (string, error) {
 	overwrite := true
 	resp, err := c.cld.Upload.Upload(ctx, srcURL, uploader.UploadParams{
-		PublicID: publicID(domain, srcURL),
+		PublicID:  publicID(domain, srcURL),
 		Overwrite: &overwrite,
 	})
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	return resp.SecureURL, nil
 }

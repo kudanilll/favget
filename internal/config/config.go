@@ -8,14 +8,14 @@ import (
 )
 
 type Config struct {
-	Port             string
-	DatabaseURL      string
-	RedisURL         string // optional; empty = caching disabled
-	CloudinaryURL    string
-	Env              string
-	RateLimitRPS     int
-	CacheTTLSec      int
-	APIKeys 				 []string // one or more API keys (comma-separated in env)
+	Port          string
+	DatabaseURL   string
+	RedisURL      string // optional; empty = caching disabled
+	CloudinaryURL string
+	Env           string
+	RateLimitRPS  int
+	CacheTTLSec   int
+	APIKeys       []string // one or more API keys (comma-separated in env)
 }
 
 func mustGet(k string) string {
@@ -27,7 +27,9 @@ func mustGet(k string) string {
 }
 
 func getDefault(k, d string) string {
-	if v := os.Getenv(k); v != "" { return v }
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
 	return d
 }
 
@@ -35,7 +37,8 @@ func getDefault(k, d string) string {
 // Empty fragments are ignored. Returns nil if no keys are configured.
 //
 // Example:
-//   API_KEY="k1,k2,  k3 " → []string{"k1","k2","k3"}
+//
+//	API_KEY="k1,k2,  k3 " → []string{"k1","k2","k3"}
 func parseAPIKeys(raw string) []string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

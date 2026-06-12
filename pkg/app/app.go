@@ -35,6 +35,6 @@ func NewHandler() (http.Handler, error) {
 		CLD:     cld,
 		APIKeys: cfg.APIKeys,
 	}
-	
+
 	return s.Routes(), nil
 }

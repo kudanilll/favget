@@ -55,9 +55,9 @@ func (s *Server) Routes() http.Handler {
 // Pass `?format=html` (or Accept: text/html) for a tiny HTML page.
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	authorName := "Achmad Daniel Syahputra"
-	authorURL  := "https://www.kudaniel.my.id"
-	repoURL    := "https://github.com/kudanilll/favget"
-	env        := "production"
+	authorURL := "https://www.kudaniel.my.id"
+	repoURL := "https://github.com/kudanilll/favget"
+	env := "production"
 
 	type route struct {
 		Method      string `json:"method"`

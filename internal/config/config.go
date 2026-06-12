@@ -8,14 +8,15 @@ import (
 )
 
 type Config struct {
-	Port          string
-	DatabaseURL   string
-	RedisURL      string // optional; empty = caching disabled
-	CloudinaryURL string
-	Env           string
-	RateLimitRPS  int
-	CacheTTLSec   int
-	APIKeys       []string // one or more API keys (comma-separated in env)
+	Port           string
+	DatabaseURL    string
+	RedisURL       string // optional; empty = caching disabled
+	CloudinaryURL  string
+	Env            string
+	RateLimitRPS   int
+	CacheTTLSec    int
+	APIKeys        []string // one or more API keys (comma-separated in env)
+	AllowedOrigins string   // comma-separated list of allowed CORS origins
 }
 
 func mustGet(k string) string {
@@ -31,6 +32,24 @@ func getDefault(k, d string) string {
 		return v
 	}
 	return d
+}
+
+func parseAllowedOrigins(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if origin := strings.TrimSpace(p); origin != "" {
+			out = append(out, origin)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // parseAPIKeys splits API_KEY on commas and trims whitespace.
@@ -89,15 +108,17 @@ func Load() Config {
 
 	apiKeys := parseAPIKeys(os.Getenv("API_KEY"))
 	env := normalizeEnv(getDefault("APP_ENV", "production"))
+	allowedOrigins := parseAllowedOrigins(getDefault("CORS_ALLOWED_ORIGINS", ""))
 
 	return Config{
-		Port:          getDefault("PORT", "8080"),
-		DatabaseURL:   mustGet("DATABASE_URL"),
-		RedisURL:      getDefault("REDIS_URL", ""), // optional – omit to disable caching
-		CloudinaryURL: mustGet("CLOUDINARY_URL"),
-		Env:           env,
-		RateLimitRPS:  rl,
-		CacheTTLSec:   ttl,
-		APIKeys:       apiKeys,
+		Port:           getDefault("PORT", "8080"),
+		DatabaseURL:    mustGet("DATABASE_URL"),
+		RedisURL:       getDefault("REDIS_URL", ""), // optional – omit to disable caching
+		CloudinaryURL:  mustGet("CLOUDINARY_URL"),
+		Env:            env,
+		RateLimitRPS:   rl,
+		CacheTTLSec:    ttl,
+		APIKeys:        apiKeys,
+		AllowedOrigins: strings.Join(allowedOrigins, ","),
 	}
 }

@@ -19,10 +19,46 @@ import (
 // Server aggregates all dependencies required by HTTP handlers.
 // Keep it small and explicit so it's easy to test and reason about.
 type Server struct {
-	DB      *store.DB
-	Cache   *cache.Cache
-	CLD     *cloud.Cloud
-	APIKeys []string // API keys enforced by middleware; empty means "no auth"
+	DB             *store.DB
+	Cache          *cache.Cache
+	CLD            *cloud.Cloud
+	APIKeys        []string // API keys enforced by middleware; empty means "no auth"
+	AllowedOrigins []string // allowed CORS origins
+}
+
+// CORS middleware for handling cross-origin requests
+func (s *Server) CORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			if s.isOriginAllowed(origin) {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+			}
+			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, X-API-Key, Content-Type")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+		}
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) isOriginAllowed(origin string) bool {
+	if len(s.AllowedOrigins) == 0 {
+		return false
+	}
+	for _, allowed := range s.AllowedOrigins {
+		if origin == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 // Routes builds the chi router. Public and secured routes are grouped explicitly
@@ -35,16 +71,21 @@ func (s *Server) Routes() http.Handler {
 
 	// --- Public endpoints (no API key required) ---
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		s.setSecurityHeaders(w)
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// --- Secured endpoints (API key required if configured) ---
-	r.Group(func(sr chi.Router) {
-		// Apply API-key middleware. If no keys were configured, this is a no-op.
-		sr.Use(APIKeyAuth(s.APIKeys))
+	// Apply CORS middleware to all routes
+	r.With(s.CORS).Group(func(cr chi.Router) {
 
-		// Main icon endpoint
-		sr.Get("/v1/icon", s.handleIcon)
+		// --- Secured endpoints (API key required if configured) ---
+		cr.Group(func(sr chi.Router) {
+			// Apply API-key middleware. If no keys were configured, this is a no-op.
+			sr.Use(APIKeyAuth(s.APIKeys))
+
+			// Main icon endpoint
+			sr.Get("/v1/icon", s.handleIcon)
+		})
 	})
 
 	return r
@@ -54,6 +95,7 @@ func (s *Server) Routes() http.Handler {
 // available routes, and auth requirements. JSON is the default response.
 // Pass `?format=html` (or Accept: text/html) for a tiny HTML page.
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	s.setSecurityHeaders(w)
 	authorName := "Achmad Daniel Syahputra"
 	authorURL := "https://www.kudaniel.my.id"
 	repoURL := "https://github.com/kudanilll/favget"
@@ -99,6 +141,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	// Switch to a minimal HTML view if requested by Accept or query param.
 	if strings.Contains(r.Header.Get("Accept"), "text/html") || r.URL.Query().Get("format") == "html" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		s.setSecurityHeaders(w)
 		const tpl = `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -139,10 +182,17 @@ small{color:#6b7280}
 		return
 	}
 
-	// Default: JSON
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func (s *Server) setSecurityHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Security-Policy", "default-src 'self'")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 }
 
 // handleIcon resolves the best icon for the given domain, uploads (remote fetch)
@@ -150,10 +200,11 @@ small{color:#6b7280}
 // and finally issues a 302 redirect to the Cloudinary URL.
 //
 // Cache strategy:
-//   - Redis GET first (fast path).
+//   - Redis GET first (hot path).
 //   - DB lookup second (warm path) with backfill into Redis.
 //   - Resolve + Upload + Upsert + Cache on miss (cold path).
 func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
+	s.setSecurityHeaders(w)
 	domain := r.URL.Query().Get("domain")
 	var err error
 	if domain, err = resolver.NormalizeDomain(domain); err != nil {

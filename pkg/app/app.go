@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/kudanilll/favget/internal/cache"
 	"github.com/kudanilll/favget/internal/cloud"
@@ -11,6 +12,24 @@ import (
 	httpx "github.com/kudanilll/favget/internal/http"
 	"github.com/kudanilll/favget/internal/store"
 )
+
+func parseAllowedOrigins(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if origin := strings.TrimSpace(p); origin != "" {
+			out = append(out, origin)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
 
 func NewHandler() (http.Handler, error) {
 	cfg := config.Load()
@@ -30,10 +49,11 @@ func NewHandler() (http.Handler, error) {
 	}
 
 	s := &httpx.Server{
-		DB:      db,
-		Cache:   cch,
-		CLD:     cld,
-		APIKeys: cfg.APIKeys,
+		DB:             db,
+		Cache:          cch,
+		CLD:            cld,
+		APIKeys:        cfg.APIKeys,
+		AllowedOrigins: parseAllowedOrigins(cfg.AllowedOrigins),
 	}
 
 	return s.Routes(), nil

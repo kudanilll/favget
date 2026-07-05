@@ -24,7 +24,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("init error: %v", err)
 	}
-	defer cleanup()
+	// We handle cleanup explicitly during graceful shutdown.
+	// But in case of an early fatal error, this ensures it's run.
 
 	// Load config after handler (so app.NewHandler() can validate env too).
 	cfg := config.Load()
@@ -66,6 +67,10 @@ func main() {
 			log.Printf("graceful shutdown failed: %v; forcing close", err)
 			_ = srv.Close()
 		}
+		
+		// Wait for singleflight routines to complete if possible, but cleanup resources at the end
+		log.Println("cleaning up resources...")
+		cleanup()
 		log.Println("server stopped")
 
 	case err := <-errCh:

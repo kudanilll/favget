@@ -274,20 +274,25 @@ func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 // resolveAndUpload deduplicates concurrent requests for the same domain using singleflight,
 // then resolves the icon, uploads to Cloudinary, persists metadata, and caches the result.
 func (s *Server) resolveAndUpload(domain string, ctx context.Context) (string, error) {
+	// Create a detached context for the background work so that if the initial caller
+	// cancels their request, it doesn't abort the work for other singleflight waiters.
+	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	
 	v, err, _ := s.singleflight.Do("icon:"+domain, func() (interface{}, error) {
-		src, meta, err := s.Resolver.ResolveBestIcon(ctx, domain)
+		defer cancel()
+		src, meta, err := s.Resolver.ResolveBestIcon(bgCtx, domain)
 		if err != nil {
 			return nil, err
 		}
 
-		cldURL, err := s.CLD.UploadRemote(ctx, domain, src)
+		cldURL, err := s.CLD.UploadRemote(bgCtx, domain, src)
 		if err != nil {
 			log.Printf("upload failed for %s: %v", domain, err)
 			return nil, errors.New("upload failed")
 		}
 
 		// Persist metadata (best-effort; the redirect should not depend on these writes)
-		_ = s.DB.Upsert(ctx, store.IconRecord{
+		_ = s.DB.Upsert(bgCtx, store.IconRecord{
 			Domain:      domain,
 			IconURL:     cldURL,
 			SourceURL:   meta.SourceURL,
@@ -296,10 +301,15 @@ func (s *Server) resolveAndUpload(domain string, ctx context.Context) (string, e
 		})
 
 		// Backfill cache
-		_ = s.Cache.Set(ctx, "icon:"+domain, cldURL)
+		_ = s.Cache.Set(bgCtx, "icon:"+domain, cldURL)
 
 		return cldURL, nil
 	})
+	
+	if err == nil {
+		cancel() // If we returned from a cache hit in singleflight or another goroutine did the work
+	}
+	
 	if err != nil {
 		return "", err
 	}

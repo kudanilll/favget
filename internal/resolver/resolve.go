@@ -93,9 +93,9 @@ func New(insecureSkipVerify bool, maxHTMLBytes int64, allowLoopback bool) *Resol
 			DisableCompression: false,
 			TLSClientConfig:    tlsCfg,
 		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return errors.New("redirects disabled")
-		},
+		// We allow redirects (up to the Go default of 10) because many sites
+		// redirect from apex to www (e.g. google.com -> www.google.com)
+		// or HTTP to HTTPS before serving the HTML.
 	}
 
 	return &Resolver{

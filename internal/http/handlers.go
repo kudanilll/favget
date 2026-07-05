@@ -275,7 +275,7 @@ func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 // then resolves the icon, uploads to Cloudinary, persists metadata, and caches the result.
 func (s *Server) resolveAndUpload(domain string, ctx context.Context) (string, error) {
 	v, err, _ := s.singleflight.Do("icon:"+domain, func() (interface{}, error) {
-		src, meta, err := s.Resolver.ResolveBestIcon(domain)
+		src, meta, err := s.Resolver.ResolveBestIcon(ctx, domain)
 		if err != nil {
 			return nil, err
 		}

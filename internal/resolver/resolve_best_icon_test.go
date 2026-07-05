@@ -84,7 +84,7 @@ func TestResolveBestIcon(t *testing.T) {
 		r := resolver.New(true, 1<<20, true)
 		r.SetClient(client)
 
-		src, _, err := r.ResolveBestIcon(domain)
+		src, _, err := r.ResolveBestIcon(context.Background(), domain)
 		if err != nil {
 			t.Fatalf("ResolveBestIcon(%q) error: %v", domain, err)
 		}
@@ -110,7 +110,7 @@ func TestResolveBestIcon(t *testing.T) {
 		r := resolver.New(true, 1<<20, true)
 		r.SetClient(client)
 
-		src, _, err := r.ResolveBestIcon(domain)
+		src, _, err := r.ResolveBestIcon(context.Background(), domain)
 		if err != nil {
 			t.Fatalf("ResolveBestIcon(%q) error: %v", domain, err)
 		}
@@ -139,7 +139,7 @@ func TestResolveBestIcon(t *testing.T) {
 		r := resolver.New(true, 1<<20, true)
 		r.SetClient(client)
 
-		src, _, err := r.ResolveBestIcon(domain)
+		src, _, err := r.ResolveBestIcon(context.Background(), domain)
 		if err != nil {
 			t.Fatalf("ResolveBestIcon(%q) error: %v", domain, err)
 		}
@@ -168,7 +168,7 @@ func TestResolveBestIcon(t *testing.T) {
 		r := resolver.New(true, 1<<20, true)
 		r.SetClient(client)
 
-		src, _, err := r.ResolveBestIcon(domain)
+		src, _, err := r.ResolveBestIcon(context.Background(), domain)
 		if err != nil {
 			t.Fatalf("ResolveBestIcon(%q) error: %v", domain, err)
 		}

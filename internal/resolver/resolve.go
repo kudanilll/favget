@@ -145,7 +145,7 @@ func isValidScheme(scheme string) bool {
 }
 
 // validateURL checks scheme, host, and resolves the host to ensure no private/reserved IPs are targeted.
-func (r *Resolver) validateURL(u *url.URL) error {
+func (r *Resolver) validateURL(ctx context.Context, u *url.URL) error {
 	if u == nil {
 		return errors.New("invalid URL")
 	}
@@ -157,8 +157,6 @@ func (r *Resolver) validateURL(u *url.URL) error {
 	}
 	host := u.Hostname()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return err
@@ -198,16 +196,22 @@ func isAllowedContentType(ct string) bool {
 
 // ResolveBestIcon fetches the target domain's HTML, parses <link> icon candidates,
 // probes each candidate via HEAD (with GET fallback), and returns the first valid icon URL.
-func (r *Resolver) ResolveBestIcon(target string) (src string, meta Meta, err error) {
+func (r *Resolver) ResolveBestIcon(ctx context.Context, target string) (src string, meta Meta, err error) {
 	destURL := "https://" + target
 	parsed, err := url.Parse(destURL)
 	if err != nil {
 		return "", meta, err
 	}
-	if err := r.validateURL(parsed); err != nil {
+	if err := r.validateURL(ctx, parsed); err != nil {
 		return "", meta, err
 	}
-	resp, err := r.Client.Get(destURL)
+	
+	req, err := http.NewRequestWithContext(ctx, "GET", destURL, nil)
+	if err != nil {
+		return "", meta, err
+	}
+	
+	resp, err := r.Client.Do(req)
 	if err != nil {
 		return "", meta, err
 	}
@@ -241,14 +245,14 @@ func (r *Resolver) ResolveBestIcon(target string) (src string, meta Meta, err er
 		if err != nil {
 			continue
 		}
-		if err := r.validateURL(absParsed); err != nil {
+		if err := r.validateURL(ctx, absParsed); err != nil {
 			continue
 		}
 
 		// Try HEAD first; fall back to GET if HEAD is unsupported (405/401/403).
-		iconURL, m, ok := r.probeIcon(abs)
+		iconURL, m, ok := r.probeIcon(ctx, abs)
 		if !ok {
-			iconURL, m, ok = r.probeIconGet(abs)
+			iconURL, m, ok = r.probeIconGet(ctx, abs)
 		}
 		if ok {
 			return iconURL, m, nil
@@ -258,8 +262,8 @@ func (r *Resolver) ResolveBestIcon(target string) (src string, meta Meta, err er
 }
 
 // probeIcon sends a HEAD request to candidateURL. Returns (url, meta, true) on success.
-func (r *Resolver) probeIcon(candidateURL string) (string, Meta, bool) {
-	req, err := http.NewRequest("HEAD", candidateURL, nil)
+func (r *Resolver) probeIcon(ctx context.Context, candidateURL string) (string, Meta, bool) {
+	req, err := http.NewRequestWithContext(ctx, "HEAD", candidateURL, nil)
 	if err != nil {
 		return "", Meta{}, false
 	}
@@ -293,8 +297,8 @@ func (r *Resolver) probeIcon(candidateURL string) (string, Meta, bool) {
 
 // probeIconGet sends a GET request with a small body read to verify the icon exists
 // and validate content type. Used when HEAD is not supported.
-func (r *Resolver) probeIconGet(candidateURL string) (string, Meta, bool) {
-	req, err := http.NewRequest("GET", candidateURL, nil)
+func (r *Resolver) probeIconGet(ctx context.Context, candidateURL string) (string, Meta, bool) {
+	req, err := http.NewRequestWithContext(ctx, "GET", candidateURL, nil)
 	if err != nil {
 		return "", Meta{}, false
 	}

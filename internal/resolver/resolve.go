@@ -205,12 +205,12 @@ func (r *Resolver) ResolveBestIcon(ctx context.Context, target string) (src stri
 	if err := r.validateURL(ctx, parsed); err != nil {
 		return "", meta, err
 	}
-	
+
 	req, err := http.NewRequestWithContext(ctx, "GET", destURL, nil)
 	if err != nil {
 		return "", meta, err
 	}
-	
+
 	resp, err := r.Client.Do(req)
 	if err != nil {
 		return "", meta, err
@@ -218,6 +218,9 @@ func (r *Resolver) ResolveBestIcon(ctx context.Context, target string) (src stri
 	defer resp.Body.Close()
 
 	// Limit HTML body reading to prevent abuse from huge responses.
+	// Note: goquery loads the entire limit into memory. A streaming HTML parser
+	// (like golang.org/x/net/html directly) would be more memory efficient for high
+	// throughput, but goquery is kept here for simplicity and readability.
 	limitedBody := io.LimitReader(resp.Body, r.MaxHTMLBytes)
 	doc, err := goquery.NewDocumentFromReader(limitedBody)
 	if err != nil {

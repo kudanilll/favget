@@ -1,233 +1,152 @@
-# Favget
+<p align="center">
+  <img src="logo.svg" width="120" height="120" alt="Favget Logo" />
+</p>
 
-Favget is a high-performance backend service for fetching and delivering favicons (and other website icons) with CDN support.
-It is designed to be **fast, reliable, and scalable** — ideal for projects that need to resolve, cache, and serve icons for multiple domains.
+<h1 align="center">Favget</h1>
 
-## Features
+<p align="center">
+  <b>High-performance backend service for fetching, caching, and serving website favicons with CDN delivery.</b>
+</p>
 
-- **Smart resolver** — Parses HTML `<link rel="icon">`, `apple-touch-icon`, `mask-icon`, and falls back to `/favicon.ico`.
-- **Fast delivery** — Optionally cache results in Redis for instant subsequent fetches.
-- **Cloud delivery** — Icons are delivered and optimized via Cloudinary (`f_auto`, `q_auto`) using remote fetch.
-- **Persistent storage (optional)** — Store metadata in Neon (Postgres) for consistency and revalidation.
-- **Simple hosting** — Deployable via Docker or any Go-compatible server.
-- **Rate limiting (optional)** — Per-IP/per-domain control via Redis.
-- **API-first** — Simple endpoints for fetching icons or metadata.
-- **API key protection (required)** — All non-health endpoints require a valid API key in production.
-- **SSRF protection** — Blocks requests to private/internal/reserved IP ranges.
-- **Negative caching** — Avoids repeated upstream lookups for domains without icons.
-- **Request deduplication** — Singleflight prevents duplicate concurrent resolves for the same domain.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License MIT"></a>
+  <img src="https://img.shields.io/badge/go-1.25-00ADD8.svg" alt="Go Version">
+  <a href="API.md"><img src="https://img.shields.io/badge/API-OpenAPI%203.0-green.svg" alt="OpenAPI 3.0"></a>
+  <img src="https://img.shields.io/badge/docker-ready-2496ED.svg" alt="Docker Ready">
+</p>
 
-## Architecture
+---
 
-- **Request Path**
-  - **Client → `cmd/server`** → **`pkg/app.NewHandler()`** → **`internal/http.Routes()`** (chi router) → endpoints (e.g. `/v1/icon`, `/healthz`).
+## Highlights
 
-- **One-Time Initialization**
-  - `internal/config`: reads env (`CLOUDINARY_URL`, `DATABASE_URL`, `REDIS_URL`, `APP_ENV`, `CACHE_TTL_SECONDS`, etc.).
-  - `internal/store`: creates a pooled **Neon Postgres** connection.
-  - `internal/cache`: sets up **Upstash Redis** if `REDIS_URL` is set; otherwise acts as a no-op.
-  - `internal/cloud`: configures **Cloudinary** from `CLOUDINARY_URL`.
-  - `internal/resolver`: builds an HTTP client with configurable TLS verification and body size limits.
-  - `pkg/app`: composes the above and returns an `http.Handler` from `internal/http`.
-  - `internal/http`: applies **API key middleware** and **rate limiting** to protected routes (see **Authentication**).
+- **Smart Resolver**: Automatically discovers `<link rel="icon">`, `apple-touch-icon`, `mask-icon`, with automatic fallback to `/favicon.ico`.
+- **Anti-Bot Resistance**: Full desktop browser header emulation (`User-Agent`, `Sec-Ch-Ua`, `Sec-Fetch-*`) and dual-target (`apex` vs `www.`) fallback routing to avoid WAF/CAPTCHA blocks.
+- **Singleflight Concurrency**: Request deduplication ensures high-traffic cache misses never overwhelm upstream servers or database pools.
+- **Multi-Tier Caching**:
+  - **Hot Path**: Upstash / Redis positive caching (`icon:<domain>`).
+  - **Warm Path**: Neon / PostgreSQL persistent metadata storage.
+  - **Cold Path**: Autonomous background resolution, Cloudinary remote fetch upload, and backfill.
+  - **Negative Caching**: Short-lived negative caching (`icon-miss:<domain>`) prevents repeated lookups for invalid/iconless sites.
+- **CDN Optimization**: Automatically transforms and delivers icons via Cloudinary (`f_auto,q_auto`).
+- **Security-First**: Strict SSRF protection blocking loopback, RFC1918 private subnets, carrier-grade NAT, and documentation IP blocks. Constant-time API key verification.
 
-- **Request Flow: `GET /v1/icon?domain=...`**
-  1. **Normalize domain** via `internal/resolver`.
-  2. **Check Redis cache** (if enabled): key `icon:<domain>`.
-     - **HIT** → respond **302 Redirect** to the cached Cloudinary URL.
-     - **MISS or disabled** → continue.
-  3. **Check negative cache**: key `icon-miss:<domain>`.
-     - **HIT** → respond **404 Not Found** immediately.
-  4. **Resolve icon** via `internal/resolver`:
-     - Parse HTML `<link rel="icon">`, `apple-touch-icon`, `mask-icon`; fallback to `/favicon.ico`.
-     - Probe each candidate via HEAD (with GET fallback) with content type validation.
-  5. **Cloud delivery** via `internal/cloud`:
-     - Build a **Cloudinary Remote Fetch** URL: `https://res.cloudinary.com/<cloud>/image/fetch/f_auto,q_auto/<source_url>`.
-  6. **Persist and cache**:
-     - Upsert metadata in **Postgres** (`icons` table).
-     - Store Cloudinary URL in **Redis** with TTL (`CACHE_TTL_SECONDS`), if Redis is configured.
-     - On miss, cache negative result with shorter TTL (`NEGATIVE_CACHE_TTL_SECONDS`).
-  7. **Respond**: **302 Redirect** to Cloudinary with `Cache-Control` and permissive CORS.
+---
 
-- **Data Model**
-  - **Postgres `icons`**: `domain` (PK), `icon_url` (Cloudinary), `source_url`, `etag`, `width`, `height`, `content_type`, `updated_at`.
-  - **Redis** (optional): `icon:<domain>` → `icon_url` (TTL = `CACHE_TTL_SECONDS`); `icon-miss:<domain>` → `1` (TTL = `NEGATIVE_CACHE_TTL_SECONDS`).
+## Architecture & Request Flow
 
-## Authentication (API Key)
+```text
+Client (GET /v1/icon?domain=github.com)
+  │
+  ├── 1. [Auth & Rate Limiting]
+  │        • API Key verification (Bearer / X-API-Key)
+  │        • Redis sliding-window rate limiting
+  │
+  ├── 2. [Hot Path - Redis]
+  │        • Hit: icon:<domain> ───────────────► 302 Redirect (Cloudinary URL)
+  │        • Hit: icon-miss:<domain> ──────────► 404 Not Found
+  │
+  ├── 3. [Warm Path - PostgreSQL]
+  │        • Hit: icons table ────────────────► Backfill Redis ──► 302 Redirect
+  │
+  └── 4. [Cold Path - Singleflight Worker]
+           • Dual-target discovery (apex & www)
+           • HTML link extraction + HEAD/GET probe
+           • Cloudinary CDN remote fetch upload
+           • Postgres upsert + Redis backfill
+           • Respond 302 Redirect
+```
 
-All non-health endpoints require a valid API key.
-**In production (`APP_ENV=production`), startup fails if no API key is configured.**
+---
 
-- **Header (recommended):**
-  - `Authorization: Bearer <API_KEY>`
-  - or `X-API-Key: <API_KEY>`
-- **Query param (discouraged; for quick tests only):**
-  - `?api_key=<API_KEY>` or `?apikey=<API_KEY>`
+## API Reference
 
-> **Warning:** Query param authentication is discouraged in production because values may appear in logs and browser history. Prefer header-based authentication.
+Comprehensive endpoint documentation, error handling, curl examples, and OpenAPI 3.0 / Swagger specifications are maintained in **[API.md](API.md)**.
 
-### Error codes
+### Quick Example
 
-- Missing/invalid key → `401 Unauthorized` (with `WWW-Authenticate` header).
+```bash
+# Resolve and redirect to Cloudinary CDN URL
+curl -i "http://localhost:8080/v1/icon?domain=github.com" \
+  -H "Authorization: Bearer <API_KEY>"
+```
 
-### Key management
-
-- Configure via environment variable `API_KEY`.
-- Rotate keys by comma-separating them: `API_KEY="old_key,new_key"` (both accepted until you remove the old one).
-
-> **Security tips**
->
-> - Prefer the `Authorization: Bearer` header over query params (query values may end up in logs and browser history).
-> - Rotate keys by comma-separating values in `API_KEY` during the rollout window.
-> - Health checks can stay public (`/healthz`); move them behind the middleware if you require full lockdown.
-
-## Security
-
-### SSRF Protection
-
-Favget resolves domains and fetches remote resources, making SSRF a critical concern.
-The resolver blocks requests to:
-
-- **Loopback:** `127.0.0.0/8`, `::1/128`
-- **Private networks:** `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
-- **Link-local:** `169.254.0.0/16`
-- **Carrier-grade NAT:** `100.64.0.0/10`
-- **IPv6 private:** `fc00::/7`, `fe80::/10`
-- **Reserved/documentation:** `0.0.0.0/8`, `192.0.0.0/24`, `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `240.0.0.0/4`, `2001:db8::/32`, `fec0::/10`
-
-All resolved IPs are validated before fetching.
-
-### TLS Verification
-
-TLS certificate verification is **enabled by default**.
-Set `ALLOW_INSECURE_TLS=true` only if you need to fetch from sites with broken TLS.
-Enabling this disables certificate verification for all outbound requests — use with caution.
-
-### Response Body Limits
-
-HTML pages are read up to `MAX_HTML_BYTES` (default 1 MiB) to prevent abuse from oversized responses.
-
-### Content Type Validation
-
-Icon candidates are validated against a whitelist of safe image content types before acceptance.
-
-### Logging
-
-API keys, secrets, tokens, and URLs containing credentials are never logged.
-
-## API Endpoints
-
-> All endpoints below **require a valid API key** unless explicitly noted.
-
-- `GET /v1/icon?domain=example.com`
-  → Redirects (302) to a Cloudinary URL (suitable for `<img>`).
-  **Auth:** required
-  **Example:**
-
-  ```bash
-  curl -i "http://localhost:8080/v1/icon?domain=github.com" \
-    -H "Authorization: Bearer <API_KEY>"
-  ```
-
-- `GET /healthz`
-  → Health probe.
-  **Auth:** not required
-
-## Environment Variables
-
-### Required
-
-| Variable         | Description                                                           | Default |
-| ---------------- | --------------------------------------------------------------------- | ------- |
-| `DATABASE_URL`   | Postgres connection string                                            | —       |
-| `CLOUDINARY_URL` | Cloudinary URL (`cloudinary://KEY:SECRET@cloud`)                      | —       |
-| `API_KEY`        | API key(s), comma-separated for rotation. **Required in production.** | —       |
-
-### Optional
-
-| Variable                     | Description                                                        | Default           |
-| ---------------------------- | ------------------------------------------------------------------ | ----------------- |
-| `PORT`                       | HTTP listen port                                                   | `8080`            |
-| `APP_ENV`                    | `dev` (development) or `production`                                | `production`      |
-| `REDIS_URL`                  | Redis connection string; omit to disable caching and rate limiting | —                 |
-| `CACHE_TTL_SECONDS`          | Positive cache TTL for resolved icons                              | `86400` (24h)     |
-| `NEGATIVE_CACHE_TTL_SECONDS` | TTL for "icon not found" cache entries                             | `300` (5min)      |
-| `RATE_LIMIT_RPS`             | Per-IP requests per second (requires Redis)                        | `10`              |
-| `ALLOW_INSECURE_TLS`         | `true` to disable TLS certificate verification                     | `false`           |
-| `MAX_HTML_BYTES`             | Max bytes to read when fetching HTML for icon parsing              | `1048576` (1 MiB) |
-| `CORS_ALLOWED_ORIGINS`       | Comma-separated list of allowed CORS origins                       | —                 |
+---
 
 ## Quickstart
 
-### 1. Clone the repository
+### 1. Clone & Configure
 
 ```bash
 git clone https://github.com/kudanilll/favget.git
 cd favget
-```
-
-### 2. Set environment variables
-
-Copy the sample and fill in your credentials:
-
-```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+Edit `.env` with your credentials:
 
-```bash
+```ini
 PORT=8080
-
-# Required
-API_KEY=your-long-random-key   # or multiple: key1,key2,key3
-CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME
-DATABASE_URL=postgres://user:pass@host:port/db
-
-# Optional — leave empty to disable Redis caching
-REDIS_URL=rediss://default:password@host:port
-
-# Tuning
 APP_ENV=production
-CACHE_TTL_SECONDS=86400
-RATE_LIMIT_RPS=10
+API_KEY=your-strong-random-api-key
+DATABASE_URL=postgres://user:pass@host:port/db?sslmode=require
+CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME
+
+# Optional: omit to disable Redis caching & rate limiting
+REDIS_URL=rediss://default:password@host:port
 ```
 
-Make sure `.env` is ignored by git:
-
-```bash
-echo ".env" >> .gitignore
-```
-
-### 3. Run locally
+### 2. Run Locally
 
 ```bash
 go run ./cmd/server
-curl -i "http://localhost:8080/v1/icon?domain=github.com"
 ```
 
-### 4. Run with Docker
+Test your local endpoint:
 
 ```bash
-# Build the image
+curl -i "http://localhost:8080/v1/icon?domain=github.com" -H "Authorization: Bearer your-strong-random-api-key"
+```
+
+### 3. Run with Docker
+
+```bash
+# Build Docker image
 docker build -t favget:latest .
 
-# Run the container
+# Run container
 docker run --rm -p 8080:8080 \
   -e PORT=8080 \
-  -e API_KEY="your-api-key" \
+  -e API_KEY="your-strong-random-api-key" \
   -e CLOUDINARY_URL="cloudinary://KEY:SECRET@cloud" \
   -e DATABASE_URL="postgres://user:pass@host:port/db?sslmode=require" \
   favget:latest
 ```
 
-Your local endpoint:
+---
 
-```text
-http://localhost:8080/v1/icon?domain=github.com
-```
+## Environment Variables
+
+| Variable                     | Required       | Default            | Description                                             |
+| ---------------------------- | -------------- | ------------------ | ------------------------------------------------------- |
+| `DATABASE_URL`               | **Yes**        | —                  | PostgreSQL connection string (Neon, Supabase, etc.)     |
+| `CLOUDINARY_URL`             | **Yes**        | —                  | Cloudinary API URL (`cloudinary://KEY:SECRET@cloud`)    |
+| `API_KEY`                    | **Yes (Prod)** | —                  | API key(s), comma-separated for zero-downtime rotation  |
+| `PORT`                       | No             | `8080`             | HTTP listen port                                        |
+| `APP_ENV`                    | No             | `production`       | `production` or `dev` (`production` enforces `API_KEY`) |
+| `REDIS_URL`                  | No             | —                  | Redis connection URL; omit to disable caching           |
+| `CACHE_TTL_SECONDS`          | No             | `86400` (24h)      | Positive cache TTL for resolved icons                   |
+| `NEGATIVE_CACHE_TTL_SECONDS` | No             | `300` (5m)         | Negative cache TTL for iconless domains                 |
+| `RATE_LIMIT_RPS`             | No             | `10`               | Per-IP request limit per second (requires Redis)        |
+| `USER_AGENT`                 | No             | Chrome 131 Desktop | Outbound User-Agent string used by the resolver         |
+| `ALLOW_INSECURE_TLS`         | No             | `false`            | Set `true` to skip upstream SSL certificate checks      |
+| `MAX_HTML_BYTES`             | No             | `1048576` (1MB)    | Max HTML response size to inspect                       |
+| `CORS_ALLOWED_ORIGINS`       | No             | —                  | Comma-separated list of allowed CORS origins            |
+
+---
 
 ## Database Schema
+
+Favget uses a single metadata table in PostgreSQL:
 
 ```sql
 CREATE TABLE IF NOT EXISTS icons (
@@ -242,57 +161,26 @@ CREATE TABLE IF NOT EXISTS icons (
 );
 ```
 
-## Redis (Optional)
+---
 
-Redis is **not required**. Favget works fully without it — caching and rate limiting are simply disabled.
-
-Redis is recommended when:
-
-- Traffic grows and you want to avoid repeated upstream fetches.
-- You need per-IP rate limiting.
-- You want negative caching to avoid repeated lookups for domains without icons.
-
-When `REDIS_URL` is set:
-
-- Positive cache: `icon:<domain>` with TTL = `CACHE_TTL_SECONDS`
-- Negative cache: `icon-miss:<domain>` with TTL = `NEGATIVE_CACHE_TTL_SECONDS`
-- Rate limit counters: `rl:<ip>` with 1-minute window
-
-## Development / Testing
+## Development
 
 ```bash
-# Run tests
-go test ./...
+# Run unit & integration tests
+go test -v ./...
 
-# Format code
-gofmt -w .
-
-# Vet code
+# Vet codebase
 go vet ./...
 
-# Run locally
-go run ./cmd/server
+# Format source files
+gofmt -w .
 ```
 
-## Production Deployment
-
-- Set `APP_ENV=production` — this requires `API_KEY` to be set.
-- Use `Authorization: Bearer <key>` or `X-API-Key: <key>` headers.
-- Do **not** set `ALLOW_INSECURE_TLS=true` unless absolutely necessary.
-- Use a reverse proxy (nginx, Caddy, Cloudflare) in front for TLS termination.
-- Monitor the `/healthz` endpoint for uptime checks.
-- PostgreSQL is required. Redis is optional but recommended for production traffic.
-
-## Roadmap
-
-- Support multiple sizes and formats (ICO, SVG, PNG)
-- Background refresh jobs
-
-## Support
-
-If you appreciate my work, you can [**buy me a coffee**](https://www.buymeacoffee.com/kudanil) and share your feedback!
+---
 
 ## License
+
+Distributed under the [MIT License](LICENSE). Copyright &copy; 2025 Achmad Daniel Syahputra.
 
 ```text
 MIT License

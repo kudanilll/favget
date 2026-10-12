@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Favget</title>
+  <g transform="translate(-43.01 -43.01) scale(1.336)">
+    <title id="favget-symbol-title">Favget Logo</title>
+    <path fill="#00ADD8" d="
+      M 48,36
+      H 208
+      L 164,80
+      H 92
+      V 116
+      H 172
+      L 128,160
+      H 92
+      V 220
+      H 48
+      Z
+    "/>
+  </g>
+</svg>

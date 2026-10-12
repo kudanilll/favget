@@ -20,7 +20,11 @@ type Config struct {
 	AllowedOrigins      string   // comma-separated list of allowed CORS origins
 	AllowInsecureTLS    bool     // default false; allow InsecureSkipVerify for broken sites
 	MaxHTMLBytes        int64    // max bytes to read when fetching a page's HTML for icon parsing
+	UserAgent           string   // User-Agent string for outgoing requests
 }
+
+// DefaultUserAgent mimics a modern desktop browser to avoid anti-bot blocks.
+const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 func mustGet(k string) string {
 	v := os.Getenv(k)
@@ -151,5 +155,6 @@ func Load() Config {
 		AllowedOrigins:      strings.Join(allowedOrigins, ","),
 		AllowInsecureTLS:    allowInsecure,
 		MaxHTMLBytes:        maxHTML,
+		UserAgent:           getDefault("USER_AGENT", DefaultUserAgent),
 	}
 }

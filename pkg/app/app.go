@@ -35,7 +35,7 @@ func NewHandler() (http.Handler, func(), error) {
 		return nil, func() {}, err
 	}
 
-	res := resolver.New(cfg.AllowInsecureTLS, cfg.MaxHTMLBytes, false)
+	res := resolver.New(cfg.AllowInsecureTLS, cfg.MaxHTMLBytes, false, cfg.UserAgent)
 
 	s := &httpx.Server{
 		DB:                  db,

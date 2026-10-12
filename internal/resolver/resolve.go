@@ -61,11 +61,15 @@ func init() {
 	}
 }
 
+// DefaultUserAgent mimics a modern desktop browser to prevent anti-bot blocks (WAF/Cloudflare/Akamai).
+const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
 // Resolver resolves favicons for domains with configurable HTTP client settings.
 type Resolver struct {
 	Client        *http.Client
 	AllowLoopback bool
 	MaxHTMLBytes  int64
+	UserAgent     string
 }
 
 // SetClient overrides the HTTP client (useful for testing).
@@ -77,9 +81,15 @@ func (r *Resolver) SetClient(c *http.Client) {
 //   - insecureSkipVerify: if false (recommended), TLS certificates are verified.
 //   - maxHTMLBytes: max bytes to read when fetching a page's HTML; 0 defaults to 1 MiB.
 //   - allowLoopback: if true, 127.0.0.1 / ::1 are allowed (for testing only).
-func New(insecureSkipVerify bool, maxHTMLBytes int64, allowLoopback bool) *Resolver {
+//   - userAgent: optional custom user agent string (defaults to DefaultUserAgent).
+func New(insecureSkipVerify bool, maxHTMLBytes int64, allowLoopback bool, userAgent ...string) *Resolver {
 	if maxHTMLBytes <= 0 {
 		maxHTMLBytes = 1 << 20 // 1 MiB
+	}
+
+	ua := DefaultUserAgent
+	if len(userAgent) > 0 && userAgent[0] != "" {
+		ua = userAgent[0]
 	}
 
 	tlsCfg := &tls.Config{
@@ -102,7 +112,34 @@ func New(insecureSkipVerify bool, maxHTMLBytes int64, allowLoopback bool) *Resol
 		Client:        client,
 		AllowLoopback: allowLoopback,
 		MaxHTMLBytes:  maxHTMLBytes,
+		UserAgent:     ua,
 	}
+}
+
+func (r *Resolver) applyDocumentHeaders(req *http.Request) {
+	req.Header.Set("User-Agent", r.UserAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Sec-Ch-Ua", `"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"`)
+	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Site", "none")
+	req.Header.Set("Sec-Fetch-User", "?1")
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
+}
+
+func (r *Resolver) applyAssetHeaders(req *http.Request) {
+	req.Header.Set("User-Agent", r.UserAgent)
+	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Sec-Ch-Ua", `"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"`)
+	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
+	req.Header.Set("Sec-Fetch-Dest", "image")
+	req.Header.Set("Sec-Fetch-Mode", "no-cors")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
 }
 
 func (r *Resolver) isPrivateIP(ip string) bool {
@@ -210,6 +247,7 @@ func (r *Resolver) ResolveBestIcon(ctx context.Context, target string) (src stri
 	if err != nil {
 		return "", meta, err
 	}
+	r.applyDocumentHeaders(req)
 
 	resp, err := r.Client.Do(req)
 	if err != nil {
@@ -270,7 +308,7 @@ func (r *Resolver) probeIcon(ctx context.Context, candidateURL string) (string, 
 	if err != nil {
 		return "", Meta{}, false
 	}
-	req.Header.Set("User-Agent", "Favget/1.0")
+	r.applyAssetHeaders(req)
 
 	h, err := r.Client.Do(req)
 	if err != nil {
@@ -305,7 +343,7 @@ func (r *Resolver) probeIconGet(ctx context.Context, candidateURL string) (strin
 	if err != nil {
 		return "", Meta{}, false
 	}
-	req.Header.Set("User-Agent", "Favget/1.0")
+	r.applyAssetHeaders(req)
 
 	h, err := r.Client.Do(req)
 	if err != nil {

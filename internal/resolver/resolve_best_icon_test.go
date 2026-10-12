@@ -22,12 +22,18 @@ func startTLSSite(t *testing.T, homeHTML string, extra map[string]http.HandlerFu
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(homeHTML))
-	})
+	if h, ok := extra["/"]; ok {
+		mux.HandleFunc("/", h)
+	} else {
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(homeHTML))
+		})
+	}
 
 	for p, h := range extra {
-		mux.HandleFunc(p, h)
+		if p != "/" {
+			mux.HandleFunc(p, h)
+		}
 	}
 
 	ts := httptest.NewTLSServer(mux)
@@ -174,6 +180,53 @@ func TestResolveBestIcon(t *testing.T) {
 		}
 		if !strings.HasSuffix(src, "/favicon.ico") {
 			t.Fatalf("got %q, want fallback /favicon.ico after content type rejection", src)
+		}
+	}
+
+	// --- Case 5: browser emulation headers are properly sent ---
+	{
+		var docUA, docDest, probeUA, probeDest string
+		customUA := "CustomBotTester/2.0"
+
+		home := `<!doctype html><head><link rel="icon" href="/header-test.png"></head>`
+		extra := map[string]http.HandlerFunc{
+			"/": func(w http.ResponseWriter, r *http.Request) {
+				docUA = r.Header.Get("User-Agent")
+				docDest = r.Header.Get("Sec-Fetch-Dest")
+				_, _ = w.Write([]byte(home))
+			},
+			"/header-test.png": func(w http.ResponseWriter, r *http.Request) {
+				probeUA = r.Header.Get("User-Agent")
+				probeDest = r.Header.Get("Sec-Fetch-Dest")
+				w.Header().Set("Content-Type", "image/png")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("PNG"))
+			},
+		}
+		domain, client, cleanup := startTLSSite(t, home, extra)
+		defer cleanup()
+
+		r := resolver.New(true, 1<<20, true, customUA)
+		r.SetClient(client)
+
+		src, _, err := r.ResolveBestIcon(context.Background(), domain)
+		if err != nil {
+			t.Fatalf("ResolveBestIcon(%q) error: %v", domain, err)
+		}
+		if !strings.HasSuffix(src, "/header-test.png") {
+			t.Fatalf("got %q, want /header-test.png", src)
+		}
+		if docUA != customUA {
+			t.Errorf("document User-Agent = %q, want %q", docUA, customUA)
+		}
+		if docDest != "document" {
+			t.Errorf("document Sec-Fetch-Dest = %q, want 'document'", docDest)
+		}
+		if probeUA != customUA {
+			t.Errorf("probe User-Agent = %q, want %q", probeUA, customUA)
+		}
+		if probeDest != "image" {
+			t.Errorf("probe Sec-Fetch-Dest = %q, want 'image'", probeDest)
 		}
 	}
 }

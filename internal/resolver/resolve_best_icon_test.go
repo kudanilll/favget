@@ -229,4 +229,71 @@ func TestResolveBestIcon(t *testing.T) {
 			t.Errorf("probe Sec-Fetch-Dest = %q, want 'image'", probeDest)
 		}
 	}
+
+	// --- Case 6: direct /favicon.ico fallback when HTML is blocked (HTTP 403) ---
+	{
+		extra := map[string]http.HandlerFunc{
+			"/": func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusForbidden) // Anti-bot / WAF challenge page
+			},
+			"/favicon.ico": func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "image/x-icon")
+				w.WriteHeader(http.StatusOK)
+				if r.Method != http.MethodHead {
+					_, _ = w.Write([]byte("ICO"))
+				}
+			},
+		}
+		domain, client, cleanup := startTLSSite(t, "", extra)
+		defer cleanup()
+
+		r := resolver.New(true, 1<<20, true)
+		r.SetClient(client)
+
+		src, _, err := r.ResolveBestIcon(context.Background(), domain)
+		if err != nil {
+			t.Fatalf("ResolveBestIcon(%q) error: %v", domain, err)
+		}
+		if !strings.HasSuffix(src, "/favicon.ico") {
+			t.Fatalf("got %q, want fallback /favicon.ico after 403 on HTML", src)
+		}
+	}
+
+	// --- Case 7: dual-target fallback (apex fails, www succeeds) ---
+	{
+		extra := map[string]http.HandlerFunc{
+			"/": func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasPrefix(r.Host, "www.") {
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(`<!doctype html><head><link rel="icon" href="/www-icon.png"></head>`))
+					return
+				}
+				// Apex returns 404 or connection failure
+				w.WriteHeader(http.StatusNotFound)
+			},
+			"/www-icon.png": func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "image/png")
+				w.WriteHeader(http.StatusOK)
+				if r.Method != http.MethodHead {
+					_, _ = w.Write([]byte("PNG"))
+				}
+			},
+		}
+		_, client, cleanup := startTLSSite(t, "", extra)
+		defer cleanup()
+
+		r := resolver.New(true, 1<<20, true)
+		r.SetClient(client)
+		r.LookupIP = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+		}
+
+		src, _, err := r.ResolveBestIcon(context.Background(), "apex-only.test")
+		if err != nil {
+			t.Fatalf("ResolveBestIcon(apex-only.test) unexpected error: %v", err)
+		}
+		if !strings.HasSuffix(src, "/www-icon.png") {
+			t.Fatalf("got %q, want www fallback /www-icon.png", src)
+		}
+	}
 }

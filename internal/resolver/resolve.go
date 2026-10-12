@@ -70,6 +70,7 @@ type Resolver struct {
 	AllowLoopback bool
 	MaxHTMLBytes  int64
 	UserAgent     string
+	LookupIP      func(ctx context.Context, host string) ([]net.IPAddr, error)
 }
 
 // SetClient overrides the HTTP client (useful for testing).
@@ -194,7 +195,13 @@ func (r *Resolver) validateURL(ctx context.Context, u *url.URL) error {
 	}
 	host := u.Hostname()
 
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	var ips []net.IPAddr
+	var err error
+	if r.LookupIP != nil {
+		ips, err = r.LookupIP(ctx, host)
+	} else {
+		ips, err = net.DefaultResolver.LookupIPAddr(ctx, host)
+	}
 	if err != nil {
 		return err
 	}
@@ -231,38 +238,86 @@ func isAllowedContentType(ct string) bool {
 	return false
 }
 
-// ResolveBestIcon fetches the target domain's HTML, parses <link> icon candidates,
-// probes each candidate via HEAD (with GET fallback), and returns the first valid icon URL.
+// ResolveBestIcon fetches the target domain's favicon using a dual-target fallback (apex vs www)
+// and probing hierarchy (HTML parsing candidates with direct /favicon.ico fallback).
 func (r *Resolver) ResolveBestIcon(ctx context.Context, target string) (src string, meta Meta, err error) {
-	destURL := "https://" + target
-	parsed, err := url.Parse(destURL)
-	if err != nil {
-		return "", meta, err
-	}
-	if err := r.validateURL(ctx, parsed); err != nil {
-		return "", meta, err
+	// 1. Try primary target first
+	src, meta, err = r.resolveForHost(ctx, target)
+	if err == nil {
+		return src, meta, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", destURL, nil)
+	// 2. Dual-target fallback: if apex failed, try www (or vice versa)
+	var altTarget string
+	if strings.HasPrefix(target, "www.") {
+		altTarget = strings.TrimPrefix(target, "www.")
+	} else {
+		altTarget = "www." + target
+	}
+
+	if altTarget != "" && altTarget != target {
+		if altSrc, altMeta, altErr := r.resolveForHost(ctx, altTarget); altErr == nil {
+			return altSrc, altMeta, nil
+		}
+	}
+
+	return "", meta, errors.New("no icon found")
+}
+
+// resolveForHost resolves an icon for a specific host by checking HTML candidates first,
+// then falling back to a direct /favicon.ico probe if HTML parsing fails or yields no candidates.
+func (r *Resolver) resolveForHost(ctx context.Context, host string) (string, Meta, error) {
+	baseURL := "https://" + host
+	parsed, err := url.Parse(baseURL)
 	if err != nil {
-		return "", meta, err
+		return "", Meta{}, err
+	}
+	if err := r.validateURL(ctx, parsed); err != nil {
+		return "", Meta{}, err
+	}
+
+	// 1. Try resolving candidates discovered from HTML
+	if src, meta, err := r.resolveHTMLCandidates(ctx, baseURL); err == nil {
+		return src, meta, nil
+	}
+
+	// 2. Direct /favicon.ico fallback probe (works when HTML is blocked by WAF/CAPTCHA or is a SPA)
+	favURL := baseURL + "/favicon.ico"
+	favParsed, err := url.Parse(favURL)
+	if err == nil && r.validateURL(ctx, favParsed) == nil {
+		if iconURL, m, ok := r.probeIcon(ctx, favURL); ok {
+			return iconURL, m, nil
+		}
+		if iconURL, m, ok := r.probeIconGet(ctx, favURL); ok {
+			return iconURL, m, nil
+		}
+	}
+
+	return "", Meta{}, errors.New("no icon found for host")
+}
+
+// resolveHTMLCandidates fetches the page HTML, parses icon link tags, and probes each candidate.
+func (r *Resolver) resolveHTMLCandidates(ctx context.Context, baseURL string) (string, Meta, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL, nil)
+	if err != nil {
+		return "", Meta{}, err
 	}
 	r.applyDocumentHeaders(req)
 
 	resp, err := r.Client.Do(req)
 	if err != nil {
-		return "", meta, err
+		return "", Meta{}, err
 	}
 	defer resp.Body.Close()
 
-	// Limit HTML body reading to prevent abuse from huge responses.
-	// Note: goquery loads the entire limit into memory. A streaming HTML parser
-	// (like golang.org/x/net/html directly) would be more memory efficient for high
-	// throughput, but goquery is kept here for simplicity and readability.
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return "", Meta{}, errors.New("non-2xx response")
+	}
+
 	limitedBody := io.LimitReader(resp.Body, r.MaxHTMLBytes)
 	doc, err := goquery.NewDocumentFromReader(limitedBody)
 	if err != nil {
-		return "", meta, err
+		return "", Meta{}, err
 	}
 
 	var candidates []string
@@ -272,9 +327,15 @@ func (r *Resolver) ResolveBestIcon(ctx context.Context, target string) (src stri
 		}
 	})
 
-	candidates = append(candidates, "/favicon.ico")
+	if len(candidates) == 0 {
+		return "", Meta{}, errors.New("no icon link tags found in HTML")
+	}
 
-	base, _ := url.Parse("https://" + target)
+	base, _ := url.Parse(baseURL)
+	if resp.Request != nil && resp.Request.URL != nil {
+		base = resp.Request.URL
+	}
+
 	for _, c := range candidates {
 		u, err := url.Parse(c)
 		if err != nil {
@@ -283,10 +344,7 @@ func (r *Resolver) ResolveBestIcon(ctx context.Context, target string) (src stri
 		abs := base.ResolveReference(u).String()
 
 		absParsed, err := url.Parse(abs)
-		if err != nil {
-			continue
-		}
-		if err := r.validateURL(ctx, absParsed); err != nil {
+		if err != nil || r.validateURL(ctx, absParsed) != nil {
 			continue
 		}
 
@@ -299,7 +357,7 @@ func (r *Resolver) ResolveBestIcon(ctx context.Context, target string) (src stri
 			return iconURL, m, nil
 		}
 	}
-	return "", meta, errors.New("no icon found")
+	return "", Meta{}, errors.New("no valid icon candidate among HTML links")
 }
 
 // probeIcon sends a HEAD request to candidateURL. Returns (url, meta, true) on success.

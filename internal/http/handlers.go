@@ -253,6 +253,12 @@ func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 	// 3) Resolve → Upload → Upsert → Cache (cold path)
 	// Use singleflight to prevent duplicate concurrent resolves for the same domain.
 	iconURL, err := s.resolveAndUpload(domain, ctx)
+	if errors.Is(err, errTransient) {
+		// Not proof that the site has no icon: don't cache a miss, and let clients retry.
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "icon temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	if err != nil {
 		// Cache the miss to avoid repeated upstream lookups.
 		if s.Cache != nil {
@@ -271,6 +277,10 @@ func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, iconURL, http.StatusFound)
 }
 
+// errTransient marks failures that say nothing about the site (an upload error or a timeout), so
+// they are answered with 503 instead of being cached as a miss.
+var errTransient = errors.New("icon temporarily unavailable")
+
 // resolveAndUpload deduplicates concurrent requests for the same domain using singleflight,
 // then resolves the icon, uploads to Cloudinary, persists metadata, and caches the result.
 func (s *Server) resolveAndUpload(domain string, ctx context.Context) (string, error) {
@@ -282,13 +292,16 @@ func (s *Server) resolveAndUpload(domain string, ctx context.Context) (string, e
 		defer cancel()
 		src, meta, err := s.Resolver.ResolveBestIcon(bgCtx, domain)
 		if err != nil {
+			if bgCtx.Err() != nil {
+				return nil, errTransient // ran out of time before every probe could answer
+			}
 			return nil, err
 		}
 
 		cldURL, err := s.CLD.UploadRemote(bgCtx, domain, src)
 		if err != nil {
 			log.Printf("upload failed for %s: %v", domain, err)
-			return nil, errors.New("upload failed")
+			return nil, errTransient
 		}
 
 		// Persist metadata (best-effort; the redirect should not depend on these writes)

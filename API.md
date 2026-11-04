@@ -67,7 +67,8 @@ GET /v1/icon
 - **`400 Bad Request`**: Target domain is malformed, contains URI paths/queries, or exceeds length limits (`invalid domain`).
 - **`401 Unauthorized`**: Missing or invalid API key. Header `WWW-Authenticate: Bearer realm="favget"` included.
 - **`404 Not Found`**: No icon could be discovered or candidate was rejected (`icon not found`).
-- **`429 Too Many Requests`**: Rate limit exceeded for client IP/Key. Header `Retry-After: <seconds>` included.
+- **`429 Too Many Requests`**: Rate limit exceeded for client IP/Key (`RATE_LIMIT_RPS` requests per second). Header `Retry-After: <seconds>` included.
+- **`503 Service Unavailable`**: The icon couldn't be fetched or uploaded right now (timeout or Cloudinary error). Not cached as a miss; retry after `Retry-After` seconds.
 
 #### Example
 
@@ -216,6 +217,8 @@ paths:
           description: Unauthorized - missing or invalid API key.
         "404":
           description: Icon not found.
+        "503":
+          description: Temporary failure (timeout or upload error); not cached as a miss.
         "429":
           description: Rate limit exceeded.
           headers:

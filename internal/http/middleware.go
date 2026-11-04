@@ -108,7 +108,9 @@ func APIKeyAuth(keys []string) func(next http.Handler) http.Handler {
 
 func RateLimitMiddleware(c *cache.Cache, rps int) func(next http.Handler) http.Handler {
 	rdb := getRedisClient(c)
-	ttl := time.Minute
+	// One-second window: rps is requests per second. A one-minute window here capped clients at
+	// rps requests per minute, so a vault list asking for its icons hit 429 after ten of them.
+	ttl := time.Second
 
 	if rps <= 0 {
 		rps = 10

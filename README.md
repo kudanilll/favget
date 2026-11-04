@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License MIT"></a>
-  <img src="https://img.shields.io/badge/go-1.25-00ADD8.svg" alt="Go Version">
+  <img src="https://img.shields.io/badge/go-1.27-00ADD8.svg" alt="Go Version">
   <a href="API.md"><img src="https://img.shields.io/badge/API-OpenAPI%203.0-green.svg" alt="OpenAPI 3.0"></a>
   <img src="https://img.shields.io/badge/docker-ready-2496ED.svg" alt="Docker Ready">
 </p>
@@ -126,22 +126,22 @@ docker run --rm -p 8080:8080 \
 
 ## Environment Variables
 
-| Variable                     | Required       | Default            | Description                                             |
-| ---------------------------- | -------------- | ------------------ | ------------------------------------------------------- |
-| `DATABASE_URL`               | **Yes**        | —                  | PostgreSQL connection string (Neon, Supabase, etc.)     |
-| `CLOUDINARY_URL`             | **Yes**        | —                  | Cloudinary API URL (`cloudinary://KEY:SECRET@cloud`)    |
-| `API_KEY`                    | **Yes (Prod)** | —                  | API key(s), comma-separated for zero-downtime rotation  |
-| `PORT`                       | No             | `8080`             | HTTP listen port                                        |
-| `APP_ENV`                    | No             | `production`       | `production` or `dev` (`production` enforces `API_KEY`) |
-| `REDIS_URL`                  | No             | —                  | Redis connection URL; omit to disable caching           |
-| `CACHE_TTL_SECONDS`          | No             | `86400` (24h)      | Positive cache TTL for resolved icons                   |
-| `NEGATIVE_CACHE_TTL_SECONDS` | No             | `300` (5m)         | Negative cache TTL for iconless domains                 |
-| `RATE_LIMIT_RPS`             | No             | `10`               | Per-IP request limit per second (requires Redis)        |
-| `USER_AGENT`                 | No             | Chrome 131 Desktop | Outbound User-Agent string used by the resolver         |
-| `ALLOW_INSECURE_TLS`         | No             | `false`            | Set `true` to skip upstream SSL certificate checks      |
+| Variable                     | Required       | Default            | Description                                                                              |
+| ---------------------------- | -------------- | ------------------ | ---------------------------------------------------------------------------------------- |
+| `DATABASE_URL`               | **Yes**        | —                  | PostgreSQL connection string (Neon, Supabase, etc.)                                      |
+| `CLOUDINARY_URL`             | **Yes**        | —                  | Cloudinary API URL (`cloudinary://KEY:SECRET@cloud`)                                     |
+| `API_KEY`                    | **Yes (Prod)** | —                  | API key(s), comma-separated for zero-downtime rotation                                   |
+| `PORT`                       | No             | `8080`             | HTTP listen port                                                                         |
+| `APP_ENV`                    | No             | `production`       | `production` or `dev` (`production` enforces `API_KEY`)                                  |
+| `REDIS_URL`                  | No             | —                  | Redis connection URL; omit to disable caching                                            |
+| `CACHE_TTL_SECONDS`          | No             | `86400` (24h)      | Positive cache TTL for resolved icons                                                    |
+| `NEGATIVE_CACHE_TTL_SECONDS` | No             | `300` (5m)         | Negative cache TTL for iconless domains                                                  |
+| `RATE_LIMIT_RPS`             | No             | `10`               | Per-IP request limit per second (requires Redis)                                         |
+| `USER_AGENT`                 | No             | Chrome 131 Desktop | Outbound User-Agent string used by the resolver                                          |
+| `ALLOW_INSECURE_TLS`         | No             | `false`            | Set `true` to skip upstream SSL certificate checks                                       |
 | `ENABLE_UPSTREAM_FALLBACK`   | No             | `true`             | Ask Google's favicon service when a site blocks every probe; Google then sees the domain |
-| `MAX_HTML_BYTES`             | No             | `1048576` (1MB)    | Max HTML response size to inspect                       |
-| `CORS_ALLOWED_ORIGINS`       | No             | —                  | Comma-separated list of allowed CORS origins            |
+| `MAX_HTML_BYTES`             | No             | `1048576` (1MB)    | Max HTML response size to inspect                                                        |
+| `CORS_ALLOWED_ORIGINS`       | No             | —                  | Comma-separated list of allowed CORS origins                                             |
 
 ---
 

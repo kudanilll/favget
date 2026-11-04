@@ -1,23 +1,35 @@
-# Build stage
-FROM golang:1.25.4-alpine3.21 AS build
+FROM golang:1.27-alpine AS builder
+
 WORKDIR /app
+
+RUN apk add --no-cache ca-certificates tzdata
+
 COPY go.mod go.sum ./
 RUN go mod download
+
 COPY . .
 
-ARG TARGETOS
-ARG TARGETARCH
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags='-s -w' -o favget ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /favget \
+    ./cmd/server
 
-# Run stage
-FROM gcr.io/distroless/static-debian12
+FROM alpine:3.24
 
-ENV PORT=8080
 WORKDIR /app
 
-COPY --from=build --chown=nonroot:nonroot /app/favget /app/favget
+RUN apk add --no-cache ca-certificates tzdata \
+    && adduser -D -H -u 10001 appuser
+
+COPY --from=builder /favget /usr/local/bin/favget
+
+USER appuser
 
 EXPOSE 8080
-USER nonroot:nonroot
 
-ENTRYPOINT ["/app/favget"]
+ENV APP_ENV=production
+ENV PORT=8080
+ENV TZ=Asia/Jakarta
+
+CMD ["favget"]

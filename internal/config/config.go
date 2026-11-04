@@ -21,6 +21,9 @@ type Config struct {
 	AllowInsecureTLS    bool     // default false; allow InsecureSkipVerify for broken sites
 	MaxHTMLBytes        int64    // max bytes to read when fetching a page's HTML for icon parsing
 	UserAgent           string   // User-Agent string for outgoing requests
+	// EnableUpstreamFallback asks Google's favicon service when the site itself yields no icon.
+	// Default true; set ENABLE_UPSTREAM_FALLBACK=false to keep every lookup on the site itself.
+	EnableUpstreamFallback bool
 }
 
 // DefaultUserAgent mimics a modern desktop browser to avoid anti-bot blocks.
@@ -137,6 +140,14 @@ func Load() Config {
 		}
 	}
 
+	upstreamFallback := true
+	if v := os.Getenv("ENABLE_UPSTREAM_FALLBACK"); v != "" {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "false", "0", "no":
+			upstreamFallback = false
+		}
+	}
+
 	// Production safety: require API_KEY when APP_ENV=production.
 	if env == "production" && len(apiKeys) == 0 {
 		log.Fatal("API_KEY is required when APP_ENV=production; set a strong random key")
@@ -156,5 +167,7 @@ func Load() Config {
 		AllowInsecureTLS:    allowInsecure,
 		MaxHTMLBytes:        maxHTML,
 		UserAgent:           getDefault("USER_AGENT", DefaultUserAgent),
+
+		EnableUpstreamFallback: upstreamFallback,
 	}
 }

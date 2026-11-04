@@ -1,0 +1,168 @@
+openapi: 3.0.3
+info:
+  title: Favget API
+  description: High-performance backend service for fetching, caching, and delivering website favicons and icons with CDN support.
+  version: 1.0.0
+  contact:
+    name: Achmad Daniel Syahputra
+    url: https://achmaddaniel.nielcode.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: http://localhost:8080
+    description: Local server
+paths:
+  /v1/icon:
+    get:
+      summary: Resolve Best Icon
+      description: Resolves the best icon for the given domain and redirects (302) to an optimized Cloudinary CDN URL.
+      operationId: getIcon
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+        - QueryAuth: []
+      parameters:
+        - name: domain
+          in: query
+          required: true
+          description: Target domain to resolve icon for (e.g. github.com)
+          schema:
+            type: string
+            example: github.com
+      responses:
+        "302":
+          description: Redirects to the Cloudinary CDN icon URL.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+              description: Cloudinary remote-fetch delivery URL.
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=86400, stale-while-revalidate=604800
+        "400":
+          description: Invalid or malformed domain parameter.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: invalid domain
+        "401":
+          description: Unauthorized - missing or invalid API key.
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+                example: Bearer realm="favget"
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: unauthorized
+        "404":
+          description: Icon not found or rejected.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: icon not found
+        "429":
+          description: Rate limit exceeded.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                example: 42
+              description: Number of seconds before retrying.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: rate limit exceeded
+
+  /healthz:
+    get:
+      summary: Health Probe
+      description: Liveness check endpoint.
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service is healthy.
+
+  /:
+    get:
+      summary: Service Index
+      description: Returns service metadata and route directory.
+      operationId: getIndex
+      parameters:
+        - name: format
+          in: query
+          required: false
+          description: Set to html to receive human-friendly web page.
+          schema:
+            type: string
+            enum: [json, html]
+      responses:
+        "200":
+          description: Service index payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service:
+                    type: string
+                    example: Favget
+                  env:
+                    type: string
+                    example: production
+                  author:
+                    type: string
+                    example: Achmad Daniel Syahputra
+                  contact:
+                    type: string
+                    example: https://achmaddaniel.nielcode.com
+                  repo:
+                    type: string
+                    example: https://github.com/kudanilll/favget
+                  routes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        method:
+                          type: string
+                          example: GET
+                        path:
+                          type: string
+                          example: /v1/icon
+                        auth:
+                          type: string
+                          example: required (API key)
+                        description:
+                          type: string
+                        example:
+                          type: string
+            text/html:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Pass API key as Bearer token in the Authorization header.
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Pass API key directly in X-API-Key header.
+    QueryAuth:
+      type: apiKey
+      in: query
+      name: api_key
+      description: Pass API key as a query parameter (dev/testing only).

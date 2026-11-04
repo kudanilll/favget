@@ -110,7 +110,7 @@ func (s *Server) Routes() http.Handler {
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	s.setSecurityHeaders(w)
 	authorName := "Achmad Daniel Syahputra"
-	authorURL := "https://www.kudaniel.my.id"
+	authorURL := "https://achmaddaniel.nielcode.com"
 	repoURL := "https://github.com/kudanilll/favget"
 	env := "production"
 
@@ -277,7 +277,7 @@ func (s *Server) resolveAndUpload(domain string, ctx context.Context) (string, e
 	// Create a detached context for the background work so that if the initial caller
 	// cancels their request, it doesn't abort the work for other singleflight waiters.
 	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-	
+
 	v, err, _ := s.singleflight.Do("icon:"+domain, func() (interface{}, error) {
 		defer cancel()
 		src, meta, err := s.Resolver.ResolveBestIcon(bgCtx, domain)
@@ -305,11 +305,11 @@ func (s *Server) resolveAndUpload(domain string, ctx context.Context) (string, e
 
 		return cldURL, nil
 	})
-	
+
 	if err == nil {
 		cancel() // If we returned from a cache hit in singleflight or another goroutine did the work
 	}
-	
+
 	if err != nil {
 		return "", err
 	}

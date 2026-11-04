@@ -36,6 +36,9 @@ func NewHandler() (http.Handler, func(), error) {
 	}
 
 	res := resolver.New(cfg.AllowInsecureTLS, cfg.MaxHTMLBytes, false, cfg.UserAgent)
+	if cfg.EnableUpstreamFallback {
+		res.UpstreamURL = resolver.GoogleS2URL
+	}
 
 	s := &httpx.Server{
 		DB:                  db,

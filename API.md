@@ -3,7 +3,7 @@
 Favget provides a lightweight, high-throughput REST API for resolving, caching, and serving website favicons and icons.
 
 - **Base URL (Local)**: `http://localhost:8080`
-- **Specification**: OpenAPI 3.0 compatible (see [OpenAPI Specification](#openapi-specification) below)
+- **OpenAPI Specification File**: [`openapi.yaml`](openapi.yaml) (OpenAPI 3.0.3)
 
 ---
 
@@ -110,7 +110,7 @@ GET /
   "service": "Favget",
   "env": "production",
   "author": "Achmad Daniel Syahputra",
-  "contact": "https://www.kudaniel.my.id",
+  "contact": "https://achmaddaniel.nielcode.com",
   "repo": "https://github.com/kudanilll/favget",
   "routes": [
     {
@@ -176,7 +176,7 @@ info:
   version: 1.0.0
   contact:
     name: Achmad Daniel Syahputra
-    url: https://www.kudaniel.my.id
+    url: https://achmaddaniel.nielcode.com
 servers:
   - url: http://localhost:8080
     description: Local development server

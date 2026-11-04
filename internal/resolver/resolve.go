@@ -64,6 +64,10 @@ func init() {
 // DefaultUserAgent mimics a modern desktop browser to prevent anti-bot blocks (WAF/Cloudflare/Akamai).
 const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
+// GoogleS2URL is Google's favicon service. The URL-escaped domain is appended; it answers 404
+// when it has no icon for a domain.
+const GoogleS2URL = "https://www.google.com/s2/favicons?sz=128&domain="
+
 // Resolver resolves favicons for domains with configurable HTTP client settings.
 type Resolver struct {
 	Client        *http.Client
@@ -71,6 +75,9 @@ type Resolver struct {
 	MaxHTMLBytes  int64
 	UserAgent     string
 	LookupIP      func(ctx context.Context, host string) ([]net.IPAddr, error)
+	// UpstreamURL is a favicon service asked when the site itself yields no icon (for example
+	// behind a WAF or login wall). The URL-escaped domain is appended. Empty disables it.
+	UpstreamURL string
 }
 
 // SetClient overrides the HTTP client (useful for testing).
@@ -213,15 +220,36 @@ func (r *Resolver) validateURL(ctx context.Context, u *url.URL) error {
 	return nil
 }
 
+// mediaType is a Content-Type without parameters (e.g. charset), lowercased.
+func mediaType(ct string) string {
+	if i := strings.IndexByte(ct, ';'); i != -1 {
+		ct = ct[:i]
+	}
+	return strings.ToLower(strings.TrimSpace(ct))
+}
+
+// isOctetStream reports the generic binary type some servers send for .ico and .png files.
+func isOctetStream(ct string) bool {
+	switch mediaType(ct) {
+	case "application/octet-stream", "binary/octet-stream":
+		return true
+	}
+	return false
+}
+
+// hasIconExtension reports whether the URL path names an .ico or .png file.
+func hasIconExtension(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	path := strings.ToLower(u.Path)
+	return strings.HasSuffix(path, ".ico") || strings.HasSuffix(path, ".png")
+}
+
 // isAllowedContentType checks if the Content-Type header represents a safe image type.
 func isAllowedContentType(ct string) bool {
-	ct = strings.TrimSpace(ct)
-	// Strip any parameters (e.g., charset)
-	if i := strings.IndexByte(ct, ';'); i != -1 {
-		ct = strings.TrimSpace(ct[:i])
-	}
-	ct = strings.ToLower(ct)
-	switch ct {
+	switch mediaType(ct) {
 	case "image/x-icon",
 		"image/vnd.microsoft.icon",
 		"image/png",
@@ -261,7 +289,25 @@ func (r *Resolver) ResolveBestIcon(ctx context.Context, target string) (src stri
 		}
 	}
 
+	// 3. Upstream fallback, for sites whose WAF or login wall blocks every direct probe.
+	if r.UpstreamURL != "" {
+		if upSrc, upMeta, ok := r.resolveUpstream(ctx, strings.TrimPrefix(target, "www.")); ok {
+			return upSrc, upMeta, nil
+		}
+	}
+
 	return "", meta, errors.New("no icon found")
+}
+
+// resolveUpstream asks the upstream favicon service for domain. Its "no icon" answer is a 404,
+// which probeIconGet already rejects.
+func (r *Resolver) resolveUpstream(ctx context.Context, domain string) (string, Meta, bool) {
+	candidate := r.UpstreamURL + url.QueryEscape(domain)
+	parsed, err := url.Parse(candidate)
+	if err != nil || r.validateURL(ctx, parsed) != nil {
+		return "", Meta{}, false
+	}
+	return r.probeIconGet(ctx, candidate)
 }
 
 // resolveForHost resolves an icon for a specific host by checking HTML candidates first,
@@ -320,13 +366,7 @@ func (r *Resolver) resolveHTMLCandidates(ctx context.Context, baseURL string) (s
 		return "", Meta{}, err
 	}
 
-	var candidates []string
-	doc.Find(`link[rel~="icon"], link[rel="apple-touch-icon"], link[rel="mask-icon"]`).Each(func(i int, s *goquery.Selection) {
-		if href, exists := s.Attr("href"); exists && href != "" {
-			candidates = append(candidates, href)
-		}
-	})
-
+	candidates := iconCandidates(doc)
 	if len(candidates) == 0 {
 		return "", Meta{}, errors.New("no icon link tags found in HTML")
 	}
@@ -360,7 +400,35 @@ func (r *Resolver) resolveHTMLCandidates(ctx context.Context, baseURL string) (s
 	return "", Meta{}, errors.New("no valid icon candidate among HTML links")
 }
 
+// iconCandidates lists icon URLs declared by the page, best first: icon links (including
+// apple-touch-icon variants) in document order, then monochrome mask icons, then the Windows
+// tile image, then the social preview image.
+func iconCandidates(doc *goquery.Document) []string {
+	var links, masks []string
+	doc.Find(`link[rel*="icon"]`).Each(func(_ int, s *goquery.Selection) {
+		href := strings.TrimSpace(s.AttrOr("href", ""))
+		if href == "" {
+			return
+		}
+		if strings.Contains(strings.ToLower(s.AttrOr("rel", "")), "mask-icon") {
+			masks = append(masks, href)
+		} else {
+			links = append(links, href)
+		}
+	})
+	candidates := append(links, masks...)
+	for _, selector := range []string{`meta[name="msapplication-TileImage"]`, `meta[property="og:image"]`} {
+		doc.Find(selector).Each(func(_ int, s *goquery.Selection) {
+			if content := strings.TrimSpace(s.AttrOr("content", "")); content != "" {
+				candidates = append(candidates, content)
+			}
+		})
+	}
+	return candidates
+}
+
 // probeIcon sends a HEAD request to candidateURL. Returns (url, meta, true) on success.
+// A generic octet-stream type fails here, so callers retry with probeIconGet, which can sniff it.
 func (r *Resolver) probeIcon(ctx context.Context, candidateURL string) (string, Meta, bool) {
 	req, err := http.NewRequestWithContext(ctx, "HEAD", candidateURL, nil)
 	if err != nil {
@@ -413,15 +481,27 @@ func (r *Resolver) probeIconGet(ctx context.Context, candidateURL string) (strin
 		return "", Meta{}, false
 	}
 
-	ct := h.Header.Get("Content-Type")
-	if ct != "" && !isAllowedContentType(ct) {
-		return "", Meta{}, false
-	}
-
-	// Read a small amount to verify content and detect content sniffing issues.
+	// Read a small amount to verify content and detect content sniffing issues. A short body is
+	// expected for tiny icons, so ErrUnexpectedEOF is not a failure here.
 	buf := make([]byte, 512)
 	n, _ := io.ReadFull(h.Body, buf)
-	_ = buf[:n] // content read but not used further; we trust the Content-Type header
+	if n == 0 {
+		return "", Meta{}, false // an empty file is not an icon
+	}
+
+	ct := h.Header.Get("Content-Type")
+	switch {
+	case ct == "" || isAllowedContentType(ct):
+	case isOctetStream(ct) && hasIconExtension(candidateURL):
+		// Some servers send .ico/.png as octet-stream: accept it only if the bytes are an image.
+		sniffed := http.DetectContentType(buf[:n])
+		if !isAllowedContentType(sniffed) {
+			return "", Meta{}, false
+		}
+		ct = sniffed
+	default:
+		return "", Meta{}, false
+	}
 
 	etag := h.Header.Get("ETag")
 	meta := Meta{SourceURL: candidateURL}

@@ -139,6 +139,7 @@ docker run --rm -p 8080:8080 \
 | `RATE_LIMIT_RPS`             | No             | `10`               | Per-IP request limit per second (requires Redis)        |
 | `USER_AGENT`                 | No             | Chrome 131 Desktop | Outbound User-Agent string used by the resolver         |
 | `ALLOW_INSECURE_TLS`         | No             | `false`            | Set `true` to skip upstream SSL certificate checks      |
+| `ENABLE_UPSTREAM_FALLBACK`   | No             | `true`             | Ask Google's favicon service when a site blocks every probe; Google then sees the domain |
 | `MAX_HTML_BYTES`             | No             | `1048576` (1MB)    | Max HTML response size to inspect                       |
 | `CORS_ALLOWED_ORIGINS`       | No             | —                  | Comma-separated list of allowed CORS origins            |
 
